@@ -38,6 +38,23 @@ def test_low_confidence_with_fields_still_answers_on_rules(catalog):
     assert request.engine == "rules" and request.intent == "recommend"
 
 
+def test_vibe_only_request_is_answered_from_rules_at_zero_confidence(catalog):
+    request = run("a game about trains", catalog, intent="recommend", confidence=0.0)
+    assert request.intent == "recommend" and request.engine == "rules" and request.unread == ()
+
+
+def test_confident_off_topic_is_declined_from_rules(catalog):
+    assert run("what is the capital of France", catalog, intent="off_topic", confidence=0.9).intent == "off_topic"
+
+
+def test_unsure_off_topic_label_falls_back_to_recommend(catalog):
+    assert run("a relaxing nature game", catalog, intent="off_topic", confidence=0.0).intent == "recommend"
+
+
+def test_unsure_another_label_falls_back_to_recommend(catalog):
+    assert run("something spooky with dice", catalog, intent="another", confidence=0.0).intent == "recommend"
+
+
 def test_thai_escalates_through_guard_then_model(catalog):
     llm = FakeLLM(parsed=MODEL_REPLY)
     request = run("อยากได้เกมเล่น 4 คน ไม่เกินชั่วโมง", catalog, llm)

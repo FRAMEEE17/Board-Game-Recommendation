@@ -10,7 +10,9 @@ from .rules import parse as rule_parse
 
 Intent = Literal["recommend", "compare", "another", "off_topic", "unclear", "injection"]
 
-# Tuned by `python -m evals.run route` on the dev split (Task 11). Replace with the printed value.
+# Gates declining off-topic requests and the fixed compare/another replies. Below it the label is
+# not trusted and the request is treated as a recommendation. It never decides whether the text was
+# read: that is `unread` and script only. Tuned by `python -m evals.run route` on the dev split.
 CONFIDENCE_THRESHOLD = 0.29
 
 PROTOTYPES: dict[Intent, list[str]] = {
@@ -128,8 +130,8 @@ def parse(text: str, *, catalog: Catalog, classifier, llm: LLM | None,
     rules = rule_parse(text, is_game=catalog.has_name, find_designer=catalog.find_designer)
     unread = rules.unread if language == "latin" else (text,)
 
-    if not unread and (confidence >= threshold or rules.has_any_field):
-        return _from_rules(text, intent if confidence >= threshold else "recommend", rules, language)
+    if not unread:
+        return _from_rules(text, _pick_intent(intent, confidence, threshold), rules, language)
 
     if llm is not None:
         if llm.guard(text) is True:
@@ -140,6 +142,13 @@ def parse(text: str, *, catalog: Catalog, classifier, llm: LLM | None,
             return request
 
     return Request(text=text, intent="unclear", unread=unread or (text,), language=language)
+
+
+def _pick_intent(label: Intent, confidence: float, threshold: float) -> Intent:
+    """Confidence decides which intent, never whether the text was read."""
+    if label in ("off_topic", "compare", "another") and confidence >= threshold:
+        return label
+    return "recommend"
 
 
 def _from_rules(text: str, intent: Intent, rules: RuleParse, language: str) -> Request:

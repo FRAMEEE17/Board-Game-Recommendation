@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from board_game_reco.catalog import HardConstraints, satisfies
-from board_game_reco.intent import parse, script_language
+from board_game_reco.intent import _pick_intent, parse, script_language
 from board_game_reco.rules import parse as rule_parse
 from evals.gold import FIELDS
 
@@ -50,8 +50,9 @@ def route_suite(gold: list[dict], catalog, classifier, out_dir: Path) -> SuiteRe
                "weight": rules.weight or ("light" if rules.first_time else None),
                "anchor": rules.anchor, "designer": rules.designer}
         miss = any(got[f] != g[f] for f in FIELDS) or g["intent"] == "unclear"
-        _, confidence = classifier.classify(g["text"])
+        label, confidence = classifier.classify(g["text"])
         rows.append({"query": g["text"], "split": g["split"], "miss": int(miss),
+                     "label": label, "confidence": confidence, "gold_intent": g["intent"],
                      "unread": int(bool(rules.unread)),
                      "non_latin": int(script_language(g["text"]) != "latin"),
                      "low_confidence": 1.0 - confidence})
@@ -60,9 +61,11 @@ def route_suite(gold: list[dict], catalog, classifier, out_dir: Path) -> SuiteRe
 
     threshold = _confidence_threshold(dev)
     for r in rows:
-        r["escalate"] = int(r["unread"] or r["non_latin"] or (1.0 - r["low_confidence"]) < threshold)
+        r["escalate"] = int(r["unread"] or r["non_latin"])
 
-    metrics = {"confidence_threshold": threshold}
+    metrics = {"confidence_threshold": threshold,
+               "intent_accuracy_dev": _intent_accuracy(dev, threshold),
+               "intent_accuracy_test": _intent_accuracy(test, threshold)}
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -92,16 +95,22 @@ def route_suite(gold: list[dict], catalog, classifier, out_dir: Path) -> SuiteRe
     return SuiteResult(rows, metrics, {"route_roc": path})
 
 
-def _confidence_threshold(dev: list[dict], target_recall: float = 0.95) -> float:
-    """Lowest confidence cut that still escalates at least 95% of dev misses."""
-    misses = [r for r in dev if r["miss"]]
-    if not misses:
+def _intent_accuracy(rows: list[dict], cut: float) -> float:
+    """Share of rows whose intent, picked as parse() picks it, equals the gold intent."""
+    scored = [r for r in rows if r["gold_intent"] not in ("injection", "unclear")]
+    if not scored:
         return 0.0
+    return sum(_pick_intent(r["label"], r["confidence"], cut) == r["gold_intent"] for r in scored) / len(scored)
+
+
+def _confidence_threshold(dev: list[dict]) -> float:
+    """Lowest cut in [0, 0.5) that maximizes intent accuracy on dev."""
+    best_cut, best = 0.0, -1.0
     for cut in np.round(np.arange(0.0, 0.5, 0.005), 3):
-        caught = [r for r in misses if r["unread"] or r["non_latin"] or (1.0 - r["low_confidence"]) < cut]
-        if len(caught) / len(misses) >= target_recall:
-            return float(cut)
-    return 0.5
+        accuracy = _intent_accuracy(dev, float(cut))
+        if accuracy > best:
+            best_cut, best = float(cut), accuracy
+    return best_cut
 
 
 def recommend_suite(gold_recommend: list[dict], gold_parse: dict[str, dict], recommender) -> SuiteResult:
