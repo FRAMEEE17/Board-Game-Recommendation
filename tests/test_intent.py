@@ -5,7 +5,8 @@ from tests.conftest import FakeLLM, StubClassifier
 
 MODEL_REPLY = {
     "intent": "recommend", "players": 4, "max_minutes": 60, "youngest_age": None, "weight": "light",
-    "coop": None, "solo": False, "first_time": False, "wants_new": False, "anchor": None, "designer": None,
+    "coop": None, "solo": False, "first_time": False, "wants_new": False, "family": False,
+    "anchor": None, "designer": None,
 }
 
 

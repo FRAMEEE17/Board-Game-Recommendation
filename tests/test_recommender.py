@@ -21,6 +21,12 @@ def test_reason_names_the_game_and_links_bgg(catalog):
     assert result.game.url in result.reason
 
 
+def test_family_request_picks_a_family_ranked_game_and_never_adult(catalog):
+    result = make(catalog).recommend("family game for 4, not too complicated")
+    assert result.game.family_rank is not None
+    assert "Mature / Adult" not in result.game.categories
+
+
 def test_runners_up_hold_one_game_per_family(catalog):
     result = make(catalog).recommend("cooperative disease outbreak game")
     games = (result.game, *result.runners_up)
@@ -83,14 +89,15 @@ def test_unclear_asks_back_quoting_the_unread_part(catalog):
 def test_unknown_anchor_asks_back(catalog):
     llm = FakeLLM(parsed={"intent": "recommend", "players": None, "max_minutes": None, "youngest_age": None,
                           "weight": None, "coop": None, "solo": False, "first_time": False,
-                          "wants_new": False, "anchor": "Zzyzx Quest", "designer": None})
+                          "wants_new": False, "family": False, "anchor": "Zzyzx Quest", "designer": None})
     result = make(catalog, llm).recommend("เกมคล้าย Zzyzx Quest")
     assert result.game is None and "Zzyzx Quest" in result.follow_up
 
 
 def test_cloud_reason_is_used_only_when_grounded(catalog):
     reply = {"intent": "recommend", "players": 4, "max_minutes": None, "youngest_age": None, "weight": None,
-             "coop": None, "solo": False, "first_time": False, "wants_new": False, "anchor": None, "designer": None}
+             "coop": None, "solo": False, "first_time": False, "wants_new": False, "family": False,
+             "anchor": None, "designer": None}
     good = make(catalog, FakeLLM(parsed=reply, written="{name} เหมาะกับ 4 คน")).recommend("เกมสำหรับ 4 คน")
     assert good.engine == "cloud"
     bad_llm = FakeLLM(parsed=reply, written="A great game rated 9.9 by 999999 people")

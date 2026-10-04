@@ -35,6 +35,7 @@ _COMPETITIVE = r"\bcompetitive\b"
 _COOP = r"\bco-?op(?:erative)?\b"
 _FIRST = r"\b(?:(?:my |our )?first (?:board ?)?game|never played|new to (?:board ?games|the hobby)|beginners?)\b"
 _NEW = r"\b(?:newest|newly released|new|recent|latest|just released)\b"
+_FAMILY = r"\b(?:family|families|kids?|children|child-friendly|kid-friendly)\b"
 _ANCHOR = r"\b(?:similar to|something like|games? like|such as|reminds? me of|fans? of|(?:i |we )?(?:really )?(?:like|love|liked|loved|enjoy|enjoyed))\s+([a-z0-9][a-z0-9:'&!.\- ]*)"
 _DESIGNER = r"\b(?:designed by|by|from)\s+([a-z][a-z'.\-]+(?:\s+[a-z][a-z'.\-]+){0,3})"
 
@@ -49,6 +50,7 @@ class RuleParse:
     solo: bool = False
     first_time: bool = False
     wants_new: bool = False
+    family: bool = False
     anchor: str | None = None
     designer: str | None = None
     unread: tuple[str, ...] = ()
@@ -58,7 +60,7 @@ class RuleParse:
         return any(
             v not in (None, False)
             for v in (self.players, self.max_minutes, self.youngest_age, self.weight, self.coop,
-                      self.solo, self.first_time, self.wants_new, self.anchor, self.designer)
+                      self.solo, self.first_time, self.wants_new, self.family, self.anchor, self.designer)
         )
 
 
@@ -89,6 +91,7 @@ def parse(
     is_game: Callable[[str], bool] = lambda name: False,
     find_designer: Callable[[str], str | None] = lambda name: None,
 ) -> RuleParse:
+    lower_text = text.lower()
     work = _Work(text)
     designer = _longest_prefix(work, _DESIGNER, find_designer)
     anchor = _longest_prefix(work, _ANCHOR, lambda s: s if is_game(s) else None)
@@ -121,6 +124,7 @@ def parse(
         coop = True
     first_time = bool(work.take(_FIRST))
     wants_new = bool(work.take(_NEW))
+    family = bool(re.search(_FAMILY, lower_text))
 
     return RuleParse(
         players=int(max(players)) if players else None,
@@ -131,6 +135,7 @@ def parse(
         solo=solo,
         first_time=first_time,
         wants_new=wants_new,
+        family=family,
         anchor=anchor,
         designer=designer,
         unread=_unread(work.text),

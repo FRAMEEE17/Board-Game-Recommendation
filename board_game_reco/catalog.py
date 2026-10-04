@@ -36,6 +36,7 @@ class Game:
     mechanics: tuple[str, ...]
     families: tuple[str, ...]
     designers: tuple[str, ...]
+    family_rank: int | None
     url: str
     description: str
 
@@ -165,6 +166,7 @@ def _read_games(csv_path: Path) -> tuple[Game, ...]:
                 mechanics=_split(row["mechanics"]),
                 families=_split(row["families"]),
                 designers=_split(row["designers"]),
+                family_rank=_known(row["rank_family"]),
                 url=row["url"],
                 description=row["description"],
             )

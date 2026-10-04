@@ -20,6 +20,8 @@ TERM_LABELS = {
     "coop": "being co-operative",
     "solo": "its solo mode",
     "new": "being a recent release",
+    "family": "being ranked as a family game on BGG",
+    "adult": "adult content",
 }
 CONSTRAINT_LABELS = {
     "players": "player count",
@@ -52,6 +54,8 @@ class Weights:
     avoid_coop: float = -1.0
     solo: float = 0.2
     new: float = 0.3
+    family: float = 0.4
+    adult: float = -1.0
     # MMR trade-off for runners-up: 0 ranks by score alone, 1 by difference from games already chosen.
     diversity: float = 0.3
 
@@ -173,6 +177,11 @@ class Recommender:
             terms["solo"] = w.solo
         if request.wants_new and game.year is not None and game.year >= NEW_SINCE:
             terms["new"] = w.new
+        if request.family:
+            if game.family_rank is not None:
+                terms["family"] = w.family
+            if "Mature / Adult" in game.categories:
+                terms["adult"] = w.adult
         return terms
 
     def _runners_up(self, pick: Scored, ranked: list[Scored], limit: int = 2, pool_size: int = 20) -> list[Scored]:
@@ -236,6 +245,8 @@ def _template(anchor: Game | None, pick: Scored, runners: list[Scored], relaxed:
         sentences.append("It is co-operative.")
     if "new" in pick.terms:
         sentences.append(f"It came out in {g.year}.")
+    if "family" in pick.terms:
+        sentences.append("BGG ranks it as a family game.")
     if runners:
         runner = runners[0]
         edge = max(pick.terms, key=lambda k: pick.terms[k] - runner.terms.get(k, 0.0))

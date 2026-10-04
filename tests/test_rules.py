@@ -15,7 +15,12 @@ def rp(text):
     "text, field, value",
     [
         ("family game for 4, not too complicated", "players", 4),
+        ("family game for 4, not too complicated", "family", True),
         ("family game for 4, not too complicated", "weight", "light"),
+        ("family", "family", True),
+        ("a game for my kids", "family", True),
+        ("a family of 4", "family", True),
+        ("a family of 4", "players", 4),
         ("a strategy game under an hour", "max_minutes", 60),
         ("something for me and 3 friends in 30 minutes", "players", 4),
         ("something for me and 3 friends in 30 minutes", "max_minutes", 30),
