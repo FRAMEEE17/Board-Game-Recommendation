@@ -42,7 +42,9 @@ _COOP = r"\bco-?op(?:erative)?\b"
 _FIRST = r"\b(?:(?:my |our )?first (?:board ?)?game|never played|new to (?:board ?games|the hobby)|beginners?)\b"
 _NEW = r"\b(?:newest|newly released|new|recent|latest|just released)\b"
 _FAMILY = r"\b(?:family|families|kids?|children|child-friendly|kid-friendly)\b"
-_ANCHOR = r"\b(?:similar to|something like|games? like|such as|reminds? me of|fans? of|(?:i |we )?(?:really )?(?:like|love|liked|loved|enjoy|enjoyed))\s+([a-z0-9][a-z0-9:'&!.\- ]*)"
+_ANCHOR = r"\b(?:similar to|something like|games? like|such as|reminds? me of|fans? of|(?:shorter|quicker|faster) than|(?:i |we )?(?:really )?(?:like|love|liked|loved|enjoy|enjoyed))\s+([a-z0-9][a-z0-9:'&!.\- ]*)"
+# Only meaningful next to a named game: "like Catan but shorter", "shorter than Catan".
+_SHORTER = r"\b(?:shorter|quicker|faster)\b"
 _DESIGNER = r"\b(?:designed by|by|from)\s+([a-z][a-z'.\-]+(?:\s+[a-z][a-z'.\-]+){0,3})"
 
 
@@ -59,6 +61,7 @@ class RuleParse:
     family: bool = False
     anchor: str | None = None
     designer: str | None = None
+    shorter_than_anchor: bool = False
     unread: tuple[str, ...] = ()
 
     @property
@@ -131,6 +134,7 @@ def parse(
     first_time = bool(work.take(_FIRST))
     wants_new = bool(work.take(_NEW))
     family = bool(re.search(_FAMILY, lower_text))
+    shorter = bool(re.search(_SHORTER, lower_text))
 
     return RuleParse(
         players=int(max(players)) if players else None,
@@ -144,6 +148,7 @@ def parse(
         family=family,
         anchor=anchor,
         designer=designer,
+        shorter_than_anchor=shorter and anchor is not None,
         unread=_unread(work.text),
     )
 

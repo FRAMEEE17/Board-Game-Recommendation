@@ -102,3 +102,27 @@ def test_real_classifier_separates_recommend_from_off_topic():
     classifier = IntentClassifier(Embedder.default())
     assert classifier.classify("recommend a board game for my family")[0] == "recommend"
     assert classifier.classify("what is the weather tomorrow")[0] == "off_topic"
+
+
+def test_shorter_than_anchor_reaches_the_request_on_rules(catalog):
+    request = run("something similar to Catan but shorter", catalog)
+    assert request.anchor == "catan" and request.shorter_than_anchor is True
+    assert request.hard.max_minutes is None
+
+
+def test_model_reply_can_ask_for_shorter_than_anchor(catalog):
+    reply = MODEL_REPLY | {"anchor": "Catan", "shorter_than_anchor": True}
+    request = run("เกมคล้าย Catan แต่สั้นกว่า", catalog, FakeLLM(parsed=reply))
+    assert request.engine == "cloud" and request.shorter_than_anchor is True
+
+
+def test_model_reply_with_a_non_bool_shorter_flag_is_rejected(catalog):
+    reply = MODEL_REPLY | {"shorter_than_anchor": "yes"}
+    assert run("เกมสั้นๆ", catalog, FakeLLM(parsed=reply)).intent == "unclear"
+
+
+def test_parse_schema_requires_every_field_including_shorter():
+    from board_game_reco.intent import PARSE_SCHEMA
+
+    assert set(PARSE_SCHEMA["required"]) == set(PARSE_SCHEMA["properties"])
+    assert "shorter_than_anchor" in PARSE_SCHEMA["required"]
