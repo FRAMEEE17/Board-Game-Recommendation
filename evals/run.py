@@ -2,7 +2,7 @@
 """python -m evals.run [suite ...]
 
 No arguments runs the suites that need no key: parse, route, recommend, perf.
-The suites that call the judge run only when named: judge, relevance, tune, explain.
+The suites that call the judge run only when named: judge, relevance, tune, explain, ragas.
 explain without a key still reports the grounding pass rate.
 """
 from __future__ import annotations
@@ -23,7 +23,7 @@ from evals.suites import parse_suite, recommend_suite, route_suite
 
 RESULTS = Path(__file__).resolve().parent / "results"
 OFFLINE = ("parse", "route", "recommend", "perf")
-NETWORK = ("judge", "relevance", "tune", "explain")
+NETWORK = ("judge", "relevance", "tune", "explain", "ragas")
 
 
 def select(names: list[str]) -> list[str]:
@@ -85,6 +85,12 @@ def main(argv: list[str]) -> None:
             results["tune"] = tune_suite(cases, lambda w: Recommender(catalog, classifier, None, w), judge)
         if "explain" in names:
             results["explain"] = explain_suite(cases, rules_only, catalog, judge)
+        if "ragas" in names:
+            from evals.ragas_faith import RagasFaithfulness
+
+            ragas = RagasFaithfulness.from_env()
+            if ragas is not None:
+                results["ragas"] = explain_suite(cases, rules_only, catalog, None, ragas)
     except DailyLimit as error:
         print(f"stopped early: {error}")
 

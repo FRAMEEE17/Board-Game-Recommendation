@@ -105,3 +105,19 @@ def test_explain_suite_grounds_template_reasons_and_averages_faithfulness(catalo
     assert metrics["mean_faithfulness"] == 5.0
     without_key = explain_suite(cases, recommender, catalog, None).metrics
     assert "mean_faithfulness" not in without_key and without_key["grounding_pass_rate"] == 1.0
+
+
+def test_ragas_wrapper_caches_each_score(tmp_path):
+    from evals.judge import Pacer
+    from evals.ragas_faith import RagasFaithfulness
+
+    calls = []
+
+    def score(question, response, contexts):
+        calls.append(question)
+        return 0.75
+
+    ragas = RagasFaithfulness(score, tmp_path, Pacer(sleep=lambda seconds: None))
+    assert ragas("q", "r", ["facts"]) == 0.75
+    assert ragas("q", "r", ["facts"]) == 0.75
+    assert calls == ["q"]

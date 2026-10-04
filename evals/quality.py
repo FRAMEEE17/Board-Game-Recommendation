@@ -139,7 +139,7 @@ def judge_suite(gold_judge: list[dict], catalog, judge, out_dir: Path, runs: int
     return SuiteResult(rows, metrics, {"judge_roc": path})
 
 
-def explain_suite(cases: list[dict], recommender, catalog, judge=None) -> SuiteResult:
+def explain_suite(cases: list[dict], recommender, catalog, judge=None, ragas=None) -> SuiteResult:
     """Grounding pass rate of the template reasons. With a judge, mean faithfulness too."""
     rows = []
     for case in cases:
@@ -155,6 +155,8 @@ def explain_suite(cases: list[dict], recommender, catalog, judge=None) -> SuiteR
         if judge is not None:
             verdict = judge.faithfulness(facts, result.reason)
             row |= {"faithfulness": verdict.score, "rationale": verdict.rationale}
+        if ragas is not None:
+            row["ragas_faithfulness"] = ragas(case["text"], result.reason, [facts])
         rows.append(row)
     metrics = {
         "explained": float(len(rows)),
@@ -164,4 +166,7 @@ def explain_suite(cases: list[dict], recommender, catalog, judge=None) -> SuiteR
     if scores:
         metrics["mean_faithfulness"] = mean(scores)
         metrics["faithfulness_5_share"] = sum(s == 5 for s in scores) / len(scores)
+    ragas_scores = [r["ragas_faithfulness"] for r in rows if "ragas_faithfulness" in r]
+    if ragas_scores:
+        metrics["mean_ragas_faithfulness"] = mean(ragas_scores)
     return SuiteResult(rows, metrics)
