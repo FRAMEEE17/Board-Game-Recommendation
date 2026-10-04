@@ -159,3 +159,24 @@ def test_vibe_query_is_won_on_meaning_not_rating():
     top20 = {catalog.games[i].id for i in raw.argsort()[::-1][:20]}
     assert result.game.name != "Gloomhaven"
     assert result.game.id in top20
+
+
+def test_shorter_than_anchor_caps_playtime_below_the_anchor(catalog):
+    catan = catalog.find("CATAN")
+    result = make(catalog).recommend("something similar to Catan but shorter")
+    assert result.game.max_minutes is not None and result.game.max_minutes < catan.max_minutes
+    assert result.relaxed == ()
+    assert f"shorter than {catan.name}" in result.reason
+
+
+def test_shorter_keeps_a_tighter_stated_limit(catalog):
+    result = make(catalog).recommend("something like Catan but shorter, under 45 minutes")
+    assert result.game.max_minutes <= 45
+
+
+def test_shorter_than_a_game_with_unknown_playtime_says_so(catalog):
+    reply = {"intent": "recommend", "players": None, "max_minutes": None, "youngest_age": None, "weight": None,
+             "coop": None, "solo": False, "first_time": False, "wants_new": False, "family": False,
+             "anchor": "Chess", "designer": None, "shorter_than_anchor": True}
+    result = make(catalog, FakeLLM(parsed=reply)).recommend("เกมคล้าย Chess แต่สั้นกว่า")
+    assert "I do not know how long Chess plays" in result.reason
