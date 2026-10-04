@@ -39,7 +39,8 @@ PROTOTYPES: dict[Intent, list[str]] = {
 }
 
 PARSE_SYSTEM = """You read requests for a board game recommendation, in any language.
-Return the fields of the schema. Use null when the request does not say.
+Return the fields of the schema. Use null when the request does not say, except for the true or false fields solo, first_time,
+wants_new, family and shorter_than_anchor: those are false when the request does not say.
 players: how many people will play. max_minutes: the longest playtime they accept.
 youngest_age: age of the youngest player. weight: light, medium or heavy.
 coop: true if they want a cooperative game, false if they reject one or want competition.

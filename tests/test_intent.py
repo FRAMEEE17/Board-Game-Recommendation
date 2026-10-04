@@ -126,3 +126,12 @@ def test_parse_schema_requires_every_field_including_shorter():
 
     assert set(PARSE_SCHEMA["required"]) == set(PARSE_SCHEMA["properties"])
     assert "shorter_than_anchor" in PARSE_SCHEMA["required"]
+
+
+def test_parse_prompt_tells_the_model_booleans_are_never_null():
+    """Groq rejects the whole reply (400) when a non-nullable boolean comes back null, and every escalated request then falls back."""
+    from board_game_reco.intent import PARSE_SCHEMA, PARSE_SYSTEM
+
+    strict = [k for k, v in PARSE_SCHEMA["properties"].items() if v["type"] == "boolean"]
+    assert strict
+    assert all(k in PARSE_SYSTEM.split("except for", 1)[1].split("false when")[0] for k in strict)
