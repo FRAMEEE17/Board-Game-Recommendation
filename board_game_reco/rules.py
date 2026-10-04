@@ -30,7 +30,8 @@ _GROUP = rf"\b(?:a )?(?:group|party|family|team) of ({_NUM})\b"
 _RANGE = rf"\b({_NUM})\s*(?:-|to)\s*({_NUM})\s*(?:players?|people|persons?|ppl)\b"
 _COUNT = rf"\b({_NUM})\s*(?:players?|people|persons?|friends|of us|ppl|kids|children)\b"
 _FOR_N = rf"\bfor ({_NUM})\b"
-_LIGHT = r"\b(?:not too (?:complicated|complex|heavy|hard)|light(?:weight)?|simple|easy(?: to learn)?|casual)\b"
+_LIGHT = (r"\b(?:not too (?:complicated|complex|heavy|hard)|light(?:weight)?|simple|easy[- ]?going|"
+          r"easy(?: to learn)?|casual|relax(?:ing|ed)?|chill(?:ed|y)?|laid[- ]back)\b")
 _MEDIUM = r"\b(?:medium(?:[- ]weight)?|mid[- ]weight)\b"
 _HEAVY = r"\b(?:heavy|complex|complicated|brain[- ]burner|crunchy|deep)\b"
 # Light first, so "not too complicated" is consumed before "complicated" can read as heavy.

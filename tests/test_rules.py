@@ -43,6 +43,11 @@ def rp(text):
         ("games by Uwe Rosenberg for 2", "designer", "Uwe Rosenberg"),
         ("games by Uwe Rosenberg for 2", "players", 2),
         ("a heavy economic game", "weight", "heavy"),
+        ("a relaxing nature game", "weight", "light"),
+        ("something chill for 4", "weight", "light"),
+        ("an easygoing game", "weight", "light"),
+        ("an easy-going game", "weight", "light"),
+        ("a laid-back game", "weight", "light"),
     ],
 )
 def test_reads_field(text, field, value):
@@ -51,7 +56,8 @@ def test_reads_field(text, field, value):
 
 @pytest.mark.parametrize(
     "text",
-    ["family game for 4, not too complicated", "a strategy game under an hour", "similar to Catan but shorter"],
+    ["family game for 4, not too complicated", "a strategy game under an hour", "similar to Catan but shorter",
+     "a relaxing nature game"],
 )
 def test_fully_read_requests_leave_nothing_unread(text):
     assert rp(text).unread == ()
