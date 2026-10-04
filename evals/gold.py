@@ -41,3 +41,21 @@ def validate_recommend(rows: list[dict], parse_ids: set[str]) -> list[str]:
         if r.get("split") not in {"dev", "test"}:
             errors.append(f"{r.get('id')}: bad split")
     return errors
+
+
+def validate_relevance(rows: list[dict]) -> list[str]:
+    errors = []
+    ids = [r.get("id") for r in rows]
+    if len(ids) != len(set(ids)):
+        errors.append("duplicate ids")
+    for r in rows:
+        missing = {"id", "text", "split", "source", "kind"} - set(r)
+        if missing:
+            errors.append(f"{r.get('id')}: missing {sorted(missing)}")
+        if r.get("split") not in {"dev", "test"}:
+            errors.append(f"{r.get('id')}: bad split")
+        if r.get("source") not in {"brief", "adversarial", "paraphrase"}:
+            errors.append(f"{r.get('id')}: bad source")
+        if r.get("kind") not in {"vibe", "anchor", "quality"}:
+            errors.append(f"{r.get('id')}: bad kind")
+    return errors

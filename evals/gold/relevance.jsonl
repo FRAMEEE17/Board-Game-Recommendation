@@ -1,0 +1,20 @@
+{"id": "v01", "text": "a relaxing nature game", "split": "dev", "source": "paraphrase", "kind": "vibe"}
+{"id": "v02", "text": "best strategy game ever", "split": "test", "source": "paraphrase", "kind": "quality"}
+{"id": "v03", "text": "something similar to Pandemic", "split": "dev", "source": "brief", "kind": "anchor"}
+{"id": "v04", "text": "a game about trains", "split": "test", "source": "paraphrase", "kind": "vibe"}
+{"id": "v05", "text": "a spooky horror game", "split": "dev", "source": "paraphrase", "kind": "vibe"}
+{"id": "v06", "text": "a game about pirates", "split": "test", "source": "paraphrase", "kind": "vibe"}
+{"id": "v07", "text": "a quick card game", "split": "dev", "source": "paraphrase", "kind": "vibe"}
+{"id": "v08", "text": "a cozy farming game", "split": "test", "source": "paraphrase", "kind": "vibe"}
+{"id": "v09", "text": "something like Wingspan", "split": "dev", "source": "brief", "kind": "anchor"}
+{"id": "v10", "text": "a dungeon crawler with miniatures", "split": "test", "source": "paraphrase", "kind": "vibe"}
+{"id": "v11", "text": "a trading game set in space", "split": "dev", "source": "paraphrase", "kind": "vibe"}
+{"id": "v12", "text": "a word game for a party", "split": "test", "source": "paraphrase", "kind": "vibe"}
+{"id": "v13", "text": "a cooperative mystery game", "split": "dev", "source": "paraphrase", "kind": "vibe"}
+{"id": "v14", "text": "a historical war game", "split": "test", "source": "paraphrase", "kind": "vibe"}
+{"id": "v15", "text": "something like Ticket to Ride but shorter", "split": "dev", "source": "adversarial", "kind": "anchor"}
+{"id": "v16", "text": "a chill game for my partner", "split": "test", "source": "adversarial", "kind": "vibe"}
+{"id": "v17", "text": "a bluffing game", "split": "dev", "source": "paraphrase", "kind": "vibe"}
+{"id": "v18", "text": "something similar to Azul", "split": "test", "source": "brief", "kind": "anchor"}
+{"id": "v19", "text": "a game about building a zoo", "split": "dev", "source": "paraphrase", "kind": "vibe"}
+{"id": "v20", "text": "a negotiation game", "split": "test", "source": "paraphrase", "kind": "vibe"}

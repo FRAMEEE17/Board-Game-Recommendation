@@ -1,7 +1,7 @@
 """The gold rows were drafted by a model, not labeled by a person. These checks are the guard."""
 from collections import Counter
 
-from evals.gold import load, validate_parse, validate_recommend
+from evals.gold import load, validate_parse, validate_recommend, validate_relevance
 
 
 def test_parse_gold_is_valid_and_complete():
@@ -28,3 +28,16 @@ def test_gold_names_exist_in_catalog(catalog):
             assert catalog.has_name(r["anchor"]), r["id"]
         if r["designer"]:
             assert catalog.find_designer(r["designer"]) == r["designer"], r["id"]
+
+
+def test_relevance_gold_is_valid_balanced_and_read_by_the_rules(catalog):
+    from board_game_reco.rules import parse as rule_parse
+
+    rows = load("relevance.jsonl")
+    assert validate_relevance(rows) == []
+    assert len(rows) == 20
+    assert Counter(r["split"] for r in rows) == {"dev": 10, "test": 10}
+    for r in rows:
+        rules = rule_parse(r["text"], is_game=catalog.has_name, find_designer=catalog.find_designer)
+        assert rules.unread == (), r["id"]
+        assert (rules.anchor is not None) == (r["kind"] == "anchor"), r["id"]
