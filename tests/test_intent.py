@@ -47,8 +47,13 @@ def test_confident_off_topic_is_declined_from_rules(catalog):
     assert run("what is the capital of France", catalog, intent="off_topic", confidence=0.9).intent == "off_topic"
 
 
-def test_unsure_off_topic_label_falls_back_to_recommend(catalog):
-    assert run("a relaxing nature game", catalog, intent="off_topic", confidence=0.0).intent == "recommend"
+def test_off_topic_label_with_no_field_is_declined_at_any_confidence(catalog):
+    assert run("what is the capital of France", catalog, intent="off_topic", confidence=0.0).intent == "off_topic"
+    assert run("a relaxing nature game", catalog, intent="off_topic", confidence=0.0).intent == "off_topic"
+
+
+def test_unsure_compare_label_falls_back_to_recommend(catalog):
+    assert run("a relaxing nature game", catalog, intent="compare", confidence=0.0).intent == "recommend"
 
 
 def test_unsure_another_label_falls_back_to_recommend(catalog):

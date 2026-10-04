@@ -53,6 +53,7 @@ def route_suite(gold: list[dict], catalog, classifier, out_dir: Path) -> SuiteRe
         label, confidence = classifier.classify(g["text"])
         rows.append({"query": g["text"], "split": g["split"], "miss": int(miss),
                      "label": label, "confidence": confidence, "gold_intent": g["intent"],
+                     "has_field": rules.has_any_field,
                      "unread": int(bool(rules.unread)),
                      "non_latin": int(script_language(g["text"]) != "latin"),
                      "low_confidence": 1.0 - confidence})
@@ -100,7 +101,7 @@ def _intent_accuracy(rows: list[dict], cut: float) -> float:
     scored = [r for r in rows if r["gold_intent"] not in ("injection", "unclear")]
     if not scored:
         return 0.0
-    return sum(_pick_intent(r["label"], r["confidence"], cut) == r["gold_intent"] for r in scored) / len(scored)
+    return sum(_pick_intent(r["label"], r["confidence"], cut, r["has_field"]) == r["gold_intent"] for r in scored) / len(scored)
 
 
 def _confidence_threshold(dev: list[dict]) -> float:

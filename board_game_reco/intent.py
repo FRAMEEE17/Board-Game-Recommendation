@@ -131,7 +131,8 @@ def parse(text: str, *, catalog: Catalog, classifier, llm: LLM | None,
     unread = rules.unread if language == "latin" else (text,)
 
     if not unread:
-        return _from_rules(text, _pick_intent(intent, confidence, threshold), rules, language)
+        picked = _pick_intent(intent, confidence, threshold, rules.has_any_field)
+        return _from_rules(text, picked, rules, language)
 
     if llm is not None:
         if llm.guard(text) is True:
@@ -144,8 +145,13 @@ def parse(text: str, *, catalog: Catalog, classifier, llm: LLM | None,
     return Request(text=text, intent="unclear", unread=unread or (text,), language=language)
 
 
-def _pick_intent(label: Intent, confidence: float, threshold: float) -> Intent:
-    """Confidence decides which intent, never whether the text was read."""
+def _pick_intent(label: Intent, confidence: float, threshold: float, has_field: bool) -> Intent:
+    """Confidence decides which intent, never whether the text was read.
+
+    An off-topic label on text that names no game constraint is declined at any confidence.
+    """
+    if label == "off_topic" and not has_field:
+        return label
     if label in ("off_topic", "compare", "another") and confidence >= threshold:
         return label
     return "recommend"
