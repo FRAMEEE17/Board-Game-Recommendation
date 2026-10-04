@@ -21,3 +21,16 @@ def test_encode_returns_unit_vectors_and_ranks_paraphrases_close():
 def test_encode_empty_list_returns_empty_matrix():
     encoder = Embedder.__new__(Embedder)
     assert encoder.encode([]).shape == (0, 384)
+
+
+def test_default_can_load_the_fp32_build(monkeypatch):
+    import huggingface_hub
+
+    from board_game_reco import embedder
+
+    asked = []
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", lambda repo, name: asked.append(name) or f"/tmp/{name}")
+    monkeypatch.setattr(embedder.Embedder, "__init__", lambda self, model, tokenizer, name: setattr(self, "name", name))
+    built = embedder.Embedder.default(embedder.FP32_ONNX)
+    assert asked[0] == "onnx/model.onnx"
+    assert built.name.endswith("onnx/model.onnx")

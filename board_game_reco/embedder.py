@@ -8,6 +8,8 @@ import numpy as np
 
 REPO = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DIMENSIONS = 384
+# Full-precision reference build in the same repo, 471 MB. Used only by the perf suite (N13).
+FP32_ONNX = "onnx/model.onnx"
 
 
 def _onnx_file() -> str:
@@ -31,10 +33,11 @@ class Embedder:
         self._tokenizer.enable_padding()
 
     @classmethod
-    def default(cls) -> Embedder:
+    def default(cls, onnx: str | None = None) -> Embedder:
+        """The int8 build for this CPU. Pass FP32_ONNX for the full-precision reference."""
         from huggingface_hub import hf_hub_download
 
-        onnx = _onnx_file()
+        onnx = onnx or _onnx_file()
         return cls(
             Path(hf_hub_download(REPO, onnx)),
             Path(hf_hub_download(REPO, "tokenizer.json")),
