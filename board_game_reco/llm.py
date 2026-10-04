@@ -144,7 +144,7 @@ def judge_json(client, system: str, user: str, schema: dict, name: str,
     raises, so an eval run never averages over a missing score. Rate limits and transient server
     errors raise Retryable.
     """
-    from openai import APIConnectionError, InternalServerError, RateLimitError
+    from openai import APIConnectionError, BadRequestError, InternalServerError, RateLimitError
 
     try:
         response = client.chat.completions.create(
@@ -159,6 +159,12 @@ def judge_json(client, system: str, user: str, schema: dict, name: str,
     except RateLimitError as error:
         raise Retryable(_retry_after(error)) from error
     except (APIConnectionError, InternalServerError) as error:
+        raise Retryable(None) from error
+    except BadRequestError as error:
+        # At temperature 1.0 the model sometimes emits text that is not the schema, and Groq answers
+        # 400 json_validate_failed. A resample usually succeeds, so treat it as transient.
+        if getattr(error, "code", None) != "json_validate_failed":
+            raise
         raise Retryable(None) from error
     return json.loads(response.choices[0].message.content), _total_tokens(response)
 

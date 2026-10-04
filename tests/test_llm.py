@@ -93,6 +93,26 @@ def test_judge_json_turns_a_rate_limit_into_retryable_with_the_server_wait():
     assert caught.value.retry_after == 7.0
 
 
+def bad_request(code):
+    import httpx
+    import openai
+
+    response = httpx.Response(400, request=httpx.Request("POST", "https://api.groq.com"))
+    return openai.BadRequestError("bad", response=response, body={"code": code})
+
+
+def test_judge_json_retries_when_the_model_breaks_the_schema():
+    with pytest.raises(Retryable):
+        judge_json(client(FakeCompletions(error=bad_request("json_validate_failed"))), "s", "u", {}, "n")
+
+
+def test_judge_json_raises_other_bad_requests():
+    import openai
+
+    with pytest.raises(openai.BadRequestError):
+        judge_json(client(FakeCompletions(error=bad_request("model_not_found"))), "s", "u", {}, "n")
+
+
 def test_judge_json_raises_on_a_reply_that_is_not_json():
     with pytest.raises(ValueError):
         judge_json(client(FakeCompletions("not json")), "s", "u", {}, "n")
