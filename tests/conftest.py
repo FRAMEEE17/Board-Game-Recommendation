@@ -50,7 +50,10 @@ class FakeLLM:
 
     def text(self, system: str, user: str) -> str | None:
         self.calls.append("text")
-        return self.written
+        if self.written is None:
+            return None
+        name = user.split("\n", 1)[0].removeprefix("Game: ")
+        return self.written.replace("{name}", name)
 
     def guard(self, text: str) -> bool | None:
         self.calls.append("guard")
