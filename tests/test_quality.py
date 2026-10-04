@@ -6,7 +6,7 @@ import pytest
 
 from evals.gold import load
 from evals.judge import Verdict
-from evals.quality import judge_suite, relevance_cases, relevance_suite, tune_suite
+from evals.quality import explain_suite, judge_suite, relevance_cases, relevance_suite, tune_suite
 
 
 class FakeJudge:
@@ -87,3 +87,21 @@ def test_judge_suite_reports_auroc_per_run_the_grounded_point_and_the_spread(cat
     assert metrics["grounded_fpr"] == 0.0
     assert metrics["score_changed_share"] == pytest.approx(1 / 30)
     assert (tmp_path / "judge_roc.png").exists()
+
+
+def test_explain_suite_grounds_template_reasons_and_averages_faithfulness(catalog):
+    from board_game_reco.recommender import Recommender
+    from tests.conftest import StubClassifier
+
+    cases = [
+        {"id": "e1", "text": "something similar to Catan but shorter", "split": "dev"},
+        {"id": "e2", "text": "a game for 12 players in 5 minutes", "split": "dev"},
+        {"id": "e3", "text": "family game for 4, not too complicated", "split": "test"},
+    ]
+    recommender = Recommender(catalog, StubClassifier(), None)
+    metrics = explain_suite(cases, recommender, catalog, FakeJudge()).metrics
+    assert metrics["explained"] == 3.0
+    assert metrics["grounding_pass_rate"] == 1.0
+    assert metrics["mean_faithfulness"] == 5.0
+    without_key = explain_suite(cases, recommender, catalog, None).metrics
+    assert "mean_faithfulness" not in without_key and without_key["grounding_pass_rate"] == 1.0

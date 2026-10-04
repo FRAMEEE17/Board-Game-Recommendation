@@ -6,6 +6,7 @@ from pathlib import Path
 from statistics import mean
 
 from board_game_reco.recommender import Weights, grounded
+from board_game_reco.rules import parse as rule_parse
 from evals.judge import game_facts
 from evals.suites import SuiteResult
 
@@ -136,3 +137,31 @@ def judge_suite(gold_judge: list[dict], catalog, judge, out_dir: Path, runs: int
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     return SuiteResult(rows, metrics, {"judge_roc": path})
+
+
+def explain_suite(cases: list[dict], recommender, catalog, judge=None) -> SuiteResult:
+    """Grounding pass rate of the template reasons. With a judge, mean faithfulness too."""
+    rows = []
+    for case in cases:
+        result = recommender.recommend(case["text"])
+        if result.game is None:
+            continue
+        name = rule_parse(case["text"], is_game=catalog.has_name, find_designer=catalog.find_designer).anchor
+        anchor = catalog.find(name) if name else None
+        facts = game_facts(result.game) + (" " + game_facts(anchor) if anchor else "")
+        allowed = " ".join([facts, case["text"], result.follow_up or "", *(g.name for g in result.runners_up)])
+        row = case | {"got": result.game.name, "reason": result.reason,
+                      "grounded": grounded(result.reason, result.game, allowed)}
+        if judge is not None:
+            verdict = judge.faithfulness(facts, result.reason)
+            row |= {"faithfulness": verdict.score, "rationale": verdict.rationale}
+        rows.append(row)
+    metrics = {
+        "explained": float(len(rows)),
+        "grounding_pass_rate": sum(r["grounded"] for r in rows) / len(rows) if rows else float("nan"),
+    }
+    scores = [r["faithfulness"] for r in rows if "faithfulness" in r]
+    if scores:
+        metrics["mean_faithfulness"] = mean(scores)
+        metrics["faithfulness_5_share"] = sum(s == 5 for s in scores) / len(scores)
+    return SuiteResult(rows, metrics)
