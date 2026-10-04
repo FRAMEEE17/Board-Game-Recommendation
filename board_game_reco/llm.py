@@ -7,6 +7,7 @@ from pathlib import Path
 GROQ_URL = "https://api.groq.com/openai/v1"
 APP_MODEL = "openai/gpt-oss-20b"
 GUARD_MODEL = "meta-llama/llama-prompt-guard-2-22m"
+JUDGE_MODEL = "qwen/qwen3.8-27b"
 DOTENV = Path(__file__).resolve().parent.parent / ".env"
 
 
@@ -113,3 +114,65 @@ def _flagged(content: str | None) -> bool | None:
     if "BENIGN" in upper:
         return False
     return None
+
+
+class Retryable(Exception):
+    """A judge call hit a rate limit or a transient error. retry_after is in seconds when the server says."""
+
+    def __init__(self, retry_after: float | None) -> None:
+        super().__init__(f"retry after {retry_after} s")
+        self.retry_after = retry_after
+
+
+def judge_client(dotenv: Path = DOTENV):
+    """Client for the evaluation judge, or None without a key. evals/judge.py owns retries and pacing."""
+    load_dotenv(dotenv)
+    key = os.environ.get("LLM_API_KEY")
+    if not key:
+        return None
+    from openai import OpenAI
+
+    return OpenAI(api_key=key, base_url=os.environ.get("LLM_BASE_URL", GROQ_URL), max_retries=0, timeout=120.0)
+
+
+def judge_json(client, system: str, user: str, schema: dict, name: str,
+               model: str | None = None) -> tuple[dict, int]:
+    """One judge call in Qwen's thinking mode. Returns the parsed reply and the tokens it used.
+
+    Groq's recommended sampling for thinking models is temperature 1.0 and top_p 0.95, because greedy
+    decoding degrades them. reasoning_format "hidden" returns only the answer. Unlike LLM.json this
+    raises, so an eval run never averages over a missing score. Rate limits and transient server
+    errors raise Retryable.
+    """
+    from openai import APIConnectionError, InternalServerError, RateLimitError
+
+    try:
+        response = client.chat.completions.create(
+            model=model or os.environ.get("JUDGE_MODEL", JUDGE_MODEL),
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+            temperature=1.0,
+            top_p=0.95,
+            reasoning_effort="low",
+            response_format={"type": "json_schema", "json_schema": {"name": name, "schema": schema, "strict": True}},
+            extra_body={"reasoning_format": "hidden"},
+        )
+    except RateLimitError as error:
+        raise Retryable(_retry_after(error)) from error
+    except (APIConnectionError, InternalServerError) as error:
+        raise Retryable(None) from error
+    return json.loads(response.choices[0].message.content), _total_tokens(response)
+
+
+def _retry_after(error) -> float | None:
+    try:
+        return float(error.response.headers.get("retry-after"))
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def _total_tokens(response) -> int:
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return 0
+    total = getattr(usage, "total_tokens", None)
+    return total or (usage.prompt_tokens or 0) + (usage.completion_tokens or 0)

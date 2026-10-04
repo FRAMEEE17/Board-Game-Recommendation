@@ -1,6 +1,10 @@
 from types import SimpleNamespace
 
-from board_game_reco.llm import LLM, _flagged, load_dotenv
+import httpx
+import openai
+import pytest
+
+from board_game_reco.llm import JUDGE_MODEL, LLM, Retryable, _flagged, judge_client, judge_json, load_dotenv
 
 
 class FakeCompletions:
@@ -60,3 +64,40 @@ def test_dotenv_never_overrides_real_environment(monkeypatch, tmp_path):
     import os
     assert os.environ["LLM_MODEL"] == "from-env"
     assert os.environ["LLM_BASE_URL"] == "https://example.test"
+
+
+def rate_limit(retry_after: str | None) -> openai.RateLimitError:
+    headers = {"retry-after": retry_after} if retry_after else {}
+    response = httpx.Response(429, headers=headers, request=httpx.Request("POST", "https://api.groq.com"))
+    return openai.RateLimitError("rate limited", response=response, body=None)
+
+
+def test_judge_json_uses_thinking_mode_sampling_and_a_strict_schema(monkeypatch):
+    monkeypatch.delenv("JUDGE_MODEL", raising=False)
+    completions = FakeCompletions('{"score": 4, "rationale": "fits"}')
+    reply, tokens = judge_json(client(completions), "sys", "user", {"type": "object"}, "relevance")
+    assert reply == {"score": 4, "rationale": "fits"}
+    assert tokens == 18
+    sent = completions.kwargs[0]
+    assert sent["model"] == JUDGE_MODEL
+    assert sent["temperature"] == 1.0 and sent["top_p"] == 0.95
+    assert sent["reasoning_effort"] == "low"
+    assert sent["extra_body"] == {"reasoning_format": "hidden"}
+    assert sent["response_format"]["json_schema"]["strict"] is True
+    assert "stream" not in sent
+
+
+def test_judge_json_turns_a_rate_limit_into_retryable_with_the_server_wait():
+    with pytest.raises(Retryable) as caught:
+        judge_json(client(FakeCompletions(error=rate_limit("7"))), "s", "u", {}, "n")
+    assert caught.value.retry_after == 7.0
+
+
+def test_judge_json_raises_on_a_reply_that_is_not_json():
+    with pytest.raises(ValueError):
+        judge_json(client(FakeCompletions("not json")), "s", "u", {}, "n")
+
+
+def test_judge_client_is_none_without_a_key(monkeypatch, tmp_path):
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    assert judge_client(tmp_path / ".env") is None
