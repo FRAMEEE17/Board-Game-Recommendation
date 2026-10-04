@@ -39,6 +39,46 @@ The app reads the key from `LLM_API_KEY` and talks to
 `https://api.groq.com/openai/v1`. Without a key, requests the rules cannot read in
 full get a question back instead of a guess.
 
+## Evaluation
+
+```bash
+uv run python -m evals.run                                 # parse, route, recommend, perf: no key needed
+uv run python -m evals.run judge relevance tune explain    # calls the judge, needs LLM_API_KEY
+uv run pytest                                              # invariants that must never break
+```
+
+Each run writes `evals/results/<date>_<sha>/` with `summary.csv`, `rows.csv` and the charts.
+
+- The judge is `qwen/qwen3.8-27b` on Groq in thinking mode. Its scores vary between runs, so the judge suite scores every row twice and reports the spread. It is measured against `evals/gold/judge.jsonl` before its relevance scores are used.
+- Judge scores are cached in `.cache/judge/`, keyed by the prompt version. A rerun pays only for new (query, game) pairs.
+- Groq's free tier gives the judge 8K tokens a minute and 200K a day. The judge suites together can need more than one day. When the daily quota runs out, the run stops, keeps every cached score, and the same command continues later.
+- Every gold row in `evals/gold/` was drafted by a model and checked by scripts against the catalog. That includes the faithful and corrupted reasons in `judge.jsonl`. No person reviewed the labels.
+- `perf` measures Basic-mode latency on the machine it runs on. The 2-CPU Docker measurement comes with the Docker image. The first `perf` run downloads the fp32 model (471 MB) for the int8 comparison.
+
+### Results
+
+| Check | Result |
+|---|---|
+| Judge AUROC on the judge gold set (two runs) | 1.0 and 1.0 |
+| `grounded()` check on corrupted reasons | catches 0.333 of them (TPR), flags 0.0 of the faithful ones (FPR) |
+| Mean judge relevance, dev split | 3.55 |
+| Mean judge relevance, test split | 3.84 |
+| Reason grounding pass rate | 1.0 (39 reasons) |
+| Mean judge faithfulness of reasons | 3.08, none scored 5 |
+| Basic latency (N3, dev machine) | p50 2.48 ms, p95 11.04 ms |
+| Cloud latency (N4, 20 escalated requests, 0 fallbacks) | p50 1453 ms, p95 1675 ms |
+| int8 against fp32 top-1 agreement (N13) | 0.95 (19 of 20) |
+
+**Judge validation.** The judge was checked on `judge.jsonl`, where half the reasons are corrupted on purpose. Both runs reached AUROC 1.0, well above the 0.75 gate, so its relevance scores were used. The plain `grounded()` string check is weaker. It catches a third of the corrupted reasons and flags none of the faithful ones.
+
+**Weight tuning.** Nine settings of `similarity` (0.6, 1.0, 1.4) and `rating` (0.2, 0.4, 0.8) were scored on the dev split. The best was similarity 0.6 and rating 0.2 at 3.60, against 3.55 for the defaults. That gain of 0.05 is within the judge's run-to-run noise, and the test split did not move (3.84 either way). The defaults stay at similarity 1.0 and rating 0.4.
+
+**Known limitations.** The judge flagged two weak picks. "best strategy game ever" returns Roll Player Adventures, which scored 1. "something similar to Pandemic" returns Virus!, which scored 2. Neither is fixed by reweighting.
+
+**Quantization.** int8 and fp32 disagree on two of 20 queries. "a game about pirates" gives Rum & Bones: Second Tide on int8 and Sail on fp32. "a quick card game" gives 6 nimmt! 25 Jahre on int8 and Last Will on fp32. Agreement meets the 0.95 target exactly.
+
+**Ragas.** `uv run --group ragas python -m evals.run ragas` is an optional faithfulness check through Ragas, outside the main install. The full run stopped at Groq's 200K daily token limit after about 20 of the 39 scores, so there is no Ragas number yet. Rerunning the same command later continues from the cached scores. The faithfulness number above comes from the judge's own prompt.
+
 ## Status
 
 Wave 1 (the recommendation engine) is implemented. Docker packaging, the judge and
