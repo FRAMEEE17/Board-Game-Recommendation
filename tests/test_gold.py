@@ -1,7 +1,7 @@
 """The gold rows were drafted by a model, not labeled by a person. These checks are the guard."""
 from collections import Counter
 
-from evals.gold import load, validate_parse, validate_recommend, validate_relevance
+from evals.gold import load, validate_judge, validate_parse, validate_recommend, validate_relevance
 
 
 def test_parse_gold_is_valid_and_complete():
@@ -41,3 +41,24 @@ def test_relevance_gold_is_valid_balanced_and_read_by_the_rules(catalog):
         rules = rule_parse(r["text"], is_game=catalog.has_name, find_designer=catalog.find_designer)
         assert rules.unread == (), r["id"]
         assert (rules.anchor is not None) == (r["kind"] == "anchor"), r["id"]
+
+
+def test_judge_gold_is_half_corrupted_and_consistent_with_the_catalog(catalog):
+    from board_game_reco.recommender import grounded
+    from evals.judge import game_facts
+
+    rows = load("judge.jsonl")
+    assert validate_judge(rows) == []
+    assert len(rows) == 30
+    assert Counter(r["label"] for r in rows) == {"faithful": 15, "corrupted": 15}
+    games = {g.id: g for g in catalog.games}
+    caught = {"swapped_number": 0, "invented_claim": 0}
+    for r in rows:
+        game = games[r["game_id"]]
+        passes = grounded(r["reason"], game, game_facts(game))
+        if r["label"] == "faithful":
+            assert passes, r["id"]
+        else:
+            caught[r["corruption"]] += not passes
+    # Only a swapped number that appears nowhere in the facts can be caught by the number check.
+    assert caught == {"swapped_number": 5, "invented_claim": 0}
