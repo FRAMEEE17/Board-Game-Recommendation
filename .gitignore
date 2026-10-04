@@ -6,3 +6,4 @@ venv/
 *.pkl
 .ipynb_checkpoints/
 .DS_Store
+*/design.md
