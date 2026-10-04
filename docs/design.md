@@ -66,6 +66,12 @@ Load-bearing decisions:
   model name triggers a rebuild, never a stale cache.
 - **The reason is built from scoring evidence**, the attributes that actually moved the
   score, so it cannot claim something about the game that isn't in the data.
+- **Output guardrail before returning.** The pick is re-checked against the hard
+  constraints, and an LLM-written reason must name the picked game, otherwise the
+  template reason is used. One check, no retry loop.
+- **A follow-up question instead of a silent guess.** When playtime was relaxed or
+  nothing matched, `Recommendation.follow_up` asks the person, e.g. "Would a 2.5-hour game
+  work?".
 
 Interface depth: callers get one call in, one immutable result out. pandas, numpy,
 sentence-transformers, the cache layout, and the LLM vendor stay private to the module
@@ -89,6 +95,18 @@ Base: candidate B (modules by owned knowledge, deep `Catalog` and `Recommender`)
 - Adapted from A: the offline/online split survives as `Catalog.load` (offline,
   materialized once) versus `Recommender.recommend` (online, per request).
 
+## Patterns taken from the reference demo
+
+`voxxeddays2026-demo` (Spring AI, Java) solves the same problems in another language.
+
+| Ref module | Pattern | Used here |
+|---|---|---|
+| `02-structured-output` | LLM output bound to a typed record, schema-validated | `intent.parse` asks for JSON shaped like `Request` and rejects invalid output |
+| `07-2-guardrails-jev`, `05-1-modular-rag` | Guardrails fail open: a bad key degrades the demo instead of breaking it | `LLM` returns `None` on any failure; the output guardrail on the pick |
+| `11-agents-llm-as-a-judge`, `21` DESIGN.md | Capped retry with feedback; the ref's own finding is that retries don't converge without actionable feedback, so state rules up front | Rules live in the prompt; a failed reason check falls back once instead of looping |
+| `15-agents-ask-user-question` | Ask a clarifying question instead of guessing | `Recommendation.follow_up` |
+| `common` (Dotenv, TokenCounterAdvisor) | Repo-root `.env`, real env vars win; per-call token log | `LLM.from_env`, `LLM.usage` |
+
 ## Tradeoffs accepted
 
 - We accept a small, English-only rule parser for the no-key path in exchange for a
@@ -110,8 +128,9 @@ Base: candidate B (modules by owned knowledge, deep `Catalog` and `Recommender`)
 - Is relaxing only playtime (×1.5, then dropped) the right relaxation policy? The earlier
   diagram said time → players → complexity. Complexity is soft so it never needs
   relaxing, and relaxing players gives wrong answers.
-- Which LLM endpoint should the demo use? The adapter speaks the OpenAI-compatible API, so
-  OpenRouter, Groq, and OpenAI all work with `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`.
+- Which LLM endpoint should the demo use? The key goes in a repo-root `.env`
+  (gitignored), same as the reference demo. OpenRouter, Groq, and OpenAI all work with
+  `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`.
 - Should "newly released" mean the last 3 years of the dataset (2023+), or the newest
   year present?
 
