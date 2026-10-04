@@ -5,6 +5,8 @@ import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+import numpy as np
+
 from .catalog import COOP, SOLO, Catalog, Game, HardConstraints, satisfies
 from .intent import IntentClassifier, Request, parse
 from .llm import LLM
@@ -151,12 +153,23 @@ class Recommender:
         return [], first_removed or {}, request.hard, ()
 
     def _rank(self, request: Request, anchor: Game | None, pool: list[Game]) -> list[Scored]:
-        similarities = self._catalog.similarity(anchor or request.text, pool)
+        query = anchor or request.text
+        mid, top = self._spread(query, anchor)
+        similarities = self._catalog.similarity(query, pool)
         scored = []
         for game, similarity in zip(pool, similarities):
-            terms = self._terms(request, game, float(similarity))
+            scaled = min(max((float(similarity) - mid) / (top - mid), 0.0), 1.0) if top > mid else 0.0
+            terms = self._terms(request, game, scaled)
             scored.append(Scored(game, sum(terms.values()), terms))
         return sorted(scored, key=lambda s: (-s.total, s.game.id))
+
+    def _spread(self, query: str | Game, anchor: Game | None) -> tuple[float, float]:
+        """Median and maximum similarity over the whole catalog, so a score does not depend on the pool."""
+        games = list(self._catalog.games)
+        raw = self._catalog.similarity(query, games)
+        if anchor is not None:
+            raw = raw[[g.id != anchor.id for g in games]]
+        return float(np.median(raw)), float(raw.max())
 
     def _terms(self, request: Request, game: Game, similarity: float) -> dict[str, float]:
         w = self._weights

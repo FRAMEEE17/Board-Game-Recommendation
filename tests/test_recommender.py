@@ -1,6 +1,9 @@
 # tests/test_recommender.py
+import pytest
+
 from board_game_reco.catalog import HardConstraints, satisfies
 from board_game_reco.recommender import Recommender, Weights, grounded
+from board_game_reco.intent import parse
 from tests.conftest import FakeLLM, StubClassifier
 
 
@@ -118,3 +121,41 @@ def test_trace_counts_each_stage(catalog):
     assert result.trace["catalog"] == 2000
     assert result.trace["picked"] == 1
     assert result.trace["eligible"] <= 2000
+
+
+def test_similarity_term_is_scaled_to_unit_range_and_follows_raw_similarity(catalog):
+    recommender = make(catalog)
+    request = parse("a relaxing nature game", catalog=catalog, classifier=StubClassifier(), llm=None)
+    pool = list(catalog.games[:200])
+    ranked = recommender._rank(request, None, pool)
+    terms = {s.game.id: s.terms["similarity"] for s in ranked}
+    assert all(0.0 <= t <= 1.0 for t in terms.values())
+    raw = catalog.similarity(request.text, pool)
+    best = pool[int(raw.argmax())]
+    assert terms[best.id] == max(terms.values())
+    whole = {s.terms["similarity"] for s in recommender._rank(request, None, list(catalog.games))}
+    assert max(whole) == pytest.approx(1.0)
+
+
+def test_similarity_term_does_not_depend_on_the_pool(catalog):
+    recommender = make(catalog)
+    request = parse("a relaxing nature game", catalog=catalog, classifier=StubClassifier(), llm=None)
+    pool = list(catalog.games[:200])
+    full = {s.game.id: s.terms["similarity"] for s in recommender._rank(request, None, pool)}
+    half = {s.game.id: s.terms["similarity"] for s in recommender._rank(request, None, pool[:50])}
+    assert all(half[i] == pytest.approx(full[i]) for i in half)
+
+
+@pytest.mark.model
+def test_vibe_query_is_won_on_meaning_not_rating():
+    from board_game_reco.embedder import Embedder
+    from board_game_reco.catalog import Catalog
+    from board_game_reco.recommender import ROOT
+
+    encoder = Embedder.default()
+    catalog = Catalog.load(ROOT / "data" / "boardgames.csv", ROOT / ".cache" / "vectors", encoder)
+    result = Recommender(catalog, StubClassifier(), None).recommend("a relaxing nature game")
+    raw = catalog.similarity("a relaxing nature game", list(catalog.games))
+    top20 = {catalog.games[i].id for i in raw.argsort()[::-1][:20]}
+    assert result.game.name != "Gloomhaven"
+    assert result.game.id in top20
