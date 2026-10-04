@@ -5,7 +5,8 @@ from dataclasses import replace
 from pathlib import Path
 from statistics import mean
 
-from board_game_reco.recommender import Weights
+from board_game_reco.recommender import Weights, grounded
+from evals.judge import game_facts
 from evals.suites import SuiteResult
 
 GRID_SIMILARITY = (0.6, 1.0, 1.4)
@@ -80,3 +81,58 @@ def tune_suite(cases: list[dict], make_recommender, judge, base: Weights = Weigh
         "test_mean_chosen": _mean_score(test_rows, "test"),
     }
     return SuiteResult(rows, metrics)
+
+
+def judge_suite(gold_judge: list[dict], catalog, judge, out_dir: Path, runs: int = 2) -> SuiteResult:
+    """How well the judge separates faithful from corrupted reasons, against the grounded() check.
+
+    Corrupted is the positive class. The judge's suspicion is 6 minus its faithfulness score.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from sklearn.metrics import roc_auc_score, roc_curve
+
+    games = {g.id: g for g in catalog.games}
+    rows = []
+    for r in gold_judge:
+        game = games[r["game_id"]]
+        facts = game_facts(game)
+        row = {"id": r["id"], "game": game.name, "label": r["label"], "corruption": r["corruption"],
+               "corrupted": int(r["label"] == "corrupted"),
+               "grounded_flags": int(not grounded(r["reason"], game, facts))}
+        for run in range(runs):
+            verdict = judge.faithfulness(facts, r["reason"], run=run)
+            row[f"score_run{run}"] = verdict.score
+            row[f"rationale_run{run}"] = verdict.rationale
+        rows.append(row)
+
+    y = [r["corrupted"] for r in rows]
+    metrics: dict[str, float] = {}
+    fig, ax = plt.subplots(figsize=(5, 5))
+    for run in range(runs):
+        suspicion = [6 - r[f"score_run{run}"] for r in rows]
+        auc = float(roc_auc_score(y, suspicion))
+        metrics[f"judge_auroc_run{run}"] = auc
+        fpr, tpr, _ = roc_curve(y, suspicion)
+        ax.plot(fpr, tpr, label=f"judge run {run + 1} (AUROC {auc:.2f})")
+    positives = sum(y)
+    negatives = len(y) - positives
+    tpr_point = sum(r["grounded_flags"] for r in rows if r["corrupted"]) / positives
+    fpr_point = sum(r["grounded_flags"] for r in rows if not r["corrupted"]) / negatives
+    metrics |= {"grounded_tpr": tpr_point, "grounded_fpr": fpr_point}
+    ax.scatter([fpr_point], [tpr_point], marker="s", s=60, color="black", zorder=3,
+               label=f"grounded() check (TPR {tpr_point:.2f}, FPR {fpr_point:.2f})")
+    if runs >= 2:
+        differences = [abs(r["score_run0"] - r["score_run1"]) for r in rows]
+        metrics["score_mean_abs_diff"] = mean(differences)
+        metrics["score_changed_share"] = sum(d > 0 for d in differences) / len(differences)
+    ax.plot([0, 1], [0, 1], linestyle="--", color="grey")
+    ax.set_xlabel("False positive rate (faithful reason flagged)")
+    ax.set_ylabel("True positive rate (corrupted reason flagged)")
+    ax.legend(loc="lower right")
+    path = Path(out_dir) / "judge_roc.png"
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return SuiteResult(rows, metrics, {"judge_roc": path})

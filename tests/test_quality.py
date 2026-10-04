@@ -6,7 +6,7 @@ import pytest
 
 from evals.gold import load
 from evals.judge import Verdict
-from evals.quality import relevance_cases, relevance_suite, tune_suite
+from evals.quality import judge_suite, relevance_cases, relevance_suite, tune_suite
 
 
 class FakeJudge:
@@ -68,3 +68,22 @@ def test_tuning_chooses_on_dev_and_scores_test_once(catalog):
     assert result.metrics["chosen_similarity"] == 1.0  # tie on dev goes to the current default
     assert result.metrics["test_mean_chosen"] == 1.0
     assert sum(r["split"] == "test" for r in result.rows) == 1
+
+
+def test_judge_suite_reports_auroc_per_run_the_grounded_point_and_the_spread(catalog, tmp_path):
+    rows = load("judge.jsonl")
+    corrupted = {r["reason"] for r in rows if r["label"] == "corrupted"}
+    first_faithful = rows[0]["reason"]
+
+    def score(facts, reason, run):
+        if run == 1 and reason == first_faithful:
+            return 4
+        return 1 if reason in corrupted else 5
+
+    result = judge_suite(rows, catalog, FakeJudge(faithfulness=score), tmp_path)
+    metrics = result.metrics
+    assert metrics["judge_auroc_run0"] == 1.0 and metrics["judge_auroc_run1"] == 1.0
+    assert metrics["grounded_tpr"] == pytest.approx(5 / 15)
+    assert metrics["grounded_fpr"] == 0.0
+    assert metrics["score_changed_share"] == pytest.approx(1 / 30)
+    assert (tmp_path / "judge_roc.png").exists()
