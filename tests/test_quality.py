@@ -1,0 +1,70 @@
+# tests/test_quality.py
+import math
+from types import SimpleNamespace
+
+import pytest
+
+from evals.gold import load
+from evals.judge import Verdict
+from evals.quality import relevance_cases, relevance_suite, tune_suite
+
+
+class FakeJudge:
+    def __init__(self, relevance=None, faithfulness=None) -> None:
+        self._relevance = relevance or (lambda query, game: 3)
+        self._faithfulness = faithfulness or (lambda facts, reason, run: 5)
+        self.calls = self.hits = self.tokens = 0
+
+    def relevance(self, query, game):
+        self.calls += 1
+        return Verdict(self._relevance(query, game), "fake", False)
+
+    def faithfulness(self, facts, reason, run=0):
+        self.calls += 1
+        return Verdict(self._faithfulness(facts, reason, run), "fake", False)
+
+
+class FakeRecommender:
+    def __init__(self, picks) -> None:
+        self._picks = picks
+
+    def recommend(self, text):
+        game = self._picks(text) if callable(self._picks) else self._picks[text]
+        return SimpleNamespace(game=game, follow_up=None if game else "which one?", reason="")
+
+
+def test_relevance_cases_join_english_recommend_rows_and_relevance_rows():
+    parse = {r["id"]: r for r in load("parse.jsonl")}
+    cases = relevance_cases(load("recommend.jsonl"), parse, load("relevance.jsonl"))
+    assert len(cases) == 40
+    assert len({c["id"] for c in cases}) == 40
+    assert {c["split"] for c in cases} == {"dev", "test"}
+
+
+def test_relevance_suite_reports_mean_per_split_and_counts_rows_without_a_pick(catalog):
+    pandemic = catalog.find("Pandemic")
+    picks = {"dev a": pandemic, "dev b": pandemic, "test a": None}
+    cases = [{"id": text, "text": text, "split": text.split()[0]} for text in picks]
+    judge = FakeJudge(relevance=lambda query, game: 4 if query == "dev a" else 2)
+    metrics = relevance_suite(cases, FakeRecommender(picks), judge).metrics
+    assert metrics["mean_relevance_dev"] == 3.0
+    assert math.isnan(metrics["mean_relevance_test"])
+    assert metrics["no_pick"] == 1.0
+
+
+def test_tuning_chooses_on_dev_and_scores_test_once(catalog):
+    good, bad = catalog.find("Pandemic"), catalog.find("CATAN")
+    cases = [{"id": "d1", "text": "dev one", "split": "dev"}, {"id": "t1", "text": "test one", "split": "test"}]
+
+    def make(weights):
+        return FakeRecommender(lambda text: good if weights.rating >= 0.8 else bad)
+
+    def relevance(query, game):
+        fits = game is good
+        return 5 if fits != query.startswith("test") else 1  # test prefers the other game
+
+    result = tune_suite(cases, make, FakeJudge(relevance=relevance))
+    assert result.metrics["chosen_rating"] == 0.8
+    assert result.metrics["chosen_similarity"] == 1.0  # tie on dev goes to the current default
+    assert result.metrics["test_mean_chosen"] == 1.0
+    assert sum(r["split"] == "test" for r in result.rows) == 1
