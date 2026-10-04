@@ -11,7 +11,7 @@ from .rules import parse as rule_parse
 Intent = Literal["recommend", "compare", "another", "off_topic", "unclear", "injection"]
 
 # Tuned by `python -m evals.run route` on the dev split (Task 11). Replace with the printed value.
-CONFIDENCE_THRESHOLD = 0.05
+CONFIDENCE_THRESHOLD = 0.29
 
 PROTOTYPES: dict[Intent, list[str]] = {
     "recommend": [
