@@ -7,3 +7,6 @@ venv/
 .ipynb_checkpoints/
 .DS_Store
 */design.md
+.cache/
+evals/results/
+docs/superpowers/
