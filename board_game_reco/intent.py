@@ -5,16 +5,15 @@ from typing import Literal
 
 from .catalog import Catalog, Encoder, HardConstraints
 from .llm import LLM
-from .rules import RuleParse
+from .rules import RuleParse, Weight
 from .rules import parse as rule_parse
 
 Intent = Literal["recommend", "compare", "another", "off_topic", "unclear", "injection"]
-Weight = Literal["light", "medium", "heavy"]
 
 # Tuned by `python -m evals.run route` on the dev split (Task 11). Replace with the printed value.
 CONFIDENCE_THRESHOLD = 0.05
 
-PROTOTYPES: dict[str, list[str]] = {
+PROTOTYPES: dict[Intent, list[str]] = {
     "recommend": [
         "recommend a board game for four players",
         "a quick party game for a big group",
@@ -95,16 +94,16 @@ class IntentClassifier:
 
     def __init__(self, encoder: Encoder) -> None:
         self._encoder = encoder
-        self._labels = [label for label, phrases in PROTOTYPES.items() for _ in phrases]
+        self._labels: list[Intent] = [label for label, phrases in PROTOTYPES.items() for _ in phrases]
         self._vectors = encoder.encode([p for phrases in PROTOTYPES.values() for p in phrases])
 
-    def classify(self, text: str) -> tuple[str, float]:
+    def classify(self, text: str) -> tuple[Intent, float]:
         scores = self._vectors @ self._encoder.encode([text])[0]
-        best: dict[str, float] = {}
+        best: dict[Intent, float] = {}
         for label, score in zip(self._labels, scores):
             best[label] = max(best.get(label, -1.0), float(score))
         ranked = sorted(best.values(), reverse=True)
-        top = max(best, key=best.get)
+        top = max(best, key=lambda label: best[label])
         return top, ranked[0] - sum(ranked[1:]) / len(ranked[1:])
 
 
@@ -143,7 +142,7 @@ def parse(text: str, *, catalog: Catalog, classifier, llm: LLM | None,
     return Request(text=text, intent="unclear", unread=unread or (text,), language=language)
 
 
-def _from_rules(text: str, intent: str, rules: RuleParse, language: str) -> Request:
+def _from_rules(text: str, intent: Intent, rules: RuleParse, language: str) -> Request:
     return Request(
         text=text,
         intent=intent,

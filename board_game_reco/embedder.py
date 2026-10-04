@@ -54,6 +54,6 @@ class Embedder:
         feed = {"input_ids": ids, "attention_mask": mask}
         if "token_type_ids" in self._inputs:
             feed["token_type_ids"] = np.zeros_like(ids)
-        hidden = self._session.run(None, feed)[0]
+        hidden = np.asarray(self._session.run(None, feed)[0])
         pooled = (hidden * mask[..., None]).sum(axis=1) / np.clip(mask.sum(axis=1, keepdims=True), 1, None)
         return pooled / np.linalg.norm(pooled, axis=1, keepdims=True)

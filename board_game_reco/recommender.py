@@ -148,7 +148,7 @@ class Recommender:
             first_removed = first_removed or removed
             if kept:
                 return kept, removed, hard, relaxed
-        return [], first_removed, request.hard, ()
+        return [], first_removed or {}, request.hard, ()
 
     def _rank(self, request: Request, anchor: Game | None, pool: list[Game]) -> list[Scored]:
         similarities = self._catalog.similarity(anchor or request.text, pool)

@@ -4,6 +4,9 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Literal
+
+Weight = Literal["light", "medium", "heavy"]
 
 _WORDS = {
     "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
@@ -30,6 +33,8 @@ _FOR_N = rf"\bfor ({_NUM})\b"
 _LIGHT = r"\b(?:not too (?:complicated|complex|heavy|hard)|light(?:weight)?|simple|easy(?: to learn)?|casual)\b"
 _MEDIUM = r"\b(?:medium(?:[- ]weight)?|mid[- ]weight)\b"
 _HEAVY = r"\b(?:heavy|complex|complicated|brain[- ]burner|crunchy|deep)\b"
+# Light first, so "not too complicated" is consumed before "complicated" can read as heavy.
+_BANDS: tuple[tuple[Weight, str], ...] = (("light", _LIGHT), ("medium", _MEDIUM), ("heavy", _HEAVY))
 _AVOID_COOP = r"\b(?:no|not|without|don'?t want(?: any)?|avoid|hate|anything but)\s+(?:a |any )?co-?op(?:erative)?(?: games?)?\b"
 _COMPETITIVE = r"\bcompetitive\b"
 _COOP = r"\bco-?op(?:erative)?\b"
@@ -45,7 +50,7 @@ class RuleParse:
     players: int | None = None
     max_minutes: int | None = None
     youngest_age: int | None = None
-    weight: str | None = None
+    weight: Weight | None = None
     coop: bool | None = None
     solo: bool = False
     first_time: bool = False
@@ -112,8 +117,8 @@ def parse(
     players += [_value(m.group(1)) for m in work.take(_COUNT)]
     players += [_value(m.group(1)) for m in work.take(_FOR_N)]
 
-    weight = None
-    for band, pattern in (("light", _LIGHT), ("medium", _MEDIUM), ("heavy", _HEAVY)):
+    weight: Weight | None = None
+    for band, pattern in _BANDS:
         if work.take(pattern) and weight is None:
             weight = band
 
