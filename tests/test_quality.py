@@ -121,3 +121,20 @@ def test_ragas_wrapper_caches_each_score(tmp_path):
     assert ragas("q", "r", ["facts"]) == 0.75
     assert ragas("q", "r", ["facts"]) == 0.75
     assert calls == ["q"]
+
+
+def test_ragas_wrapper_retries_a_failed_score(tmp_path):
+    from evals.judge import Pacer
+    from evals.ragas_faith import RagasFaithfulness
+
+    attempts = []
+
+    def score(question, response, contexts):
+        attempts.append(question)
+        if len(attempts) < 3:
+            raise RuntimeError("429 rate limit")
+        return 0.5
+
+    ragas = RagasFaithfulness(score, tmp_path, Pacer(sleep=lambda seconds: None), sleep=lambda seconds: None)
+    assert ragas("q", "r", ["facts"]) == 0.5
+    assert len(attempts) == 3

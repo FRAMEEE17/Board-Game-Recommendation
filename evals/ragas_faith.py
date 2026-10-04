@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -14,6 +15,8 @@ from evals.judge import CACHE, Pacer, cache_key
 RAGAS_VERSION = "ragas-faithfulness-v1"
 # Ragas makes about two model calls per score: one splits the answer into claims, one checks them.
 TOKENS_PER_SCORE = 3000
+# Groq answers 429 on output tokens per minute even when the pace is right, and Ragas gives up on the first one.
+MAX_ATTEMPTS = 5
 
 
 def _ragas_score(question: str, response: str, contexts: list[str]) -> float:
@@ -33,8 +36,9 @@ def _ragas_score(question: str, response: str, contexts: list[str]) -> float:
 
 class RagasFaithfulness:
     def __init__(self, score: Callable[[str, str, list[str]], float] = _ragas_score, cache_dir: Path = CACHE,
-                 pacer: Pacer | None = None) -> None:
+                 pacer: Pacer | None = None, sleep: Callable[[float], None] = time.sleep) -> None:
         self._score = score
+        self._sleep = sleep
         self._cache = Path(cache_dir)
         self._pacer = pacer or Pacer()
         self.calls = 0
@@ -48,9 +52,18 @@ class RagasFaithfulness:
         path = self._cache / f"{cache_key(RAGAS_VERSION, question, response, contexts)}.json"
         if path.exists():
             return json.loads(path.read_text(encoding="utf-8"))["value"]
-        self._pacer.wait(TOKENS_PER_SCORE)
-        value = self._score(question, response, contexts)
-        self._pacer.record(TOKENS_PER_SCORE)
+        for attempt in range(MAX_ATTEMPTS):
+            self._pacer.wait(TOKENS_PER_SCORE)
+            try:
+                value = self._score(question, response, contexts)
+            except Exception:
+                self._pacer.record(TOKENS_PER_SCORE)
+                if attempt == MAX_ATTEMPTS - 1:
+                    raise
+                self._sleep(15.0 * 2**attempt)
+                continue
+            self._pacer.record(TOKENS_PER_SCORE)
+            break
         self.calls += 1
         self._cache.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"value": value}), encoding="utf-8")
