@@ -11,3 +11,4 @@ venv/
 evals/results/
 docs/superpowers/
 */interview-notes.md
+scripts/build_notebook.py
