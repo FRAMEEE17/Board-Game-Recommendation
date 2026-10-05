@@ -18,6 +18,9 @@ dev = [
     "matplotlib>=3.9",
     "nbformat>=5.10",
 ]
+map = [
+    "umap-learn>=0.5",
+]
 ragas = [
     "ragas>=0.4",
     "langchain-community<0.4",
