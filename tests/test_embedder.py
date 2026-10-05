@@ -30,7 +30,42 @@ def test_default_can_load_the_fp32_build(monkeypatch):
 
     asked = []
     monkeypatch.setattr(huggingface_hub, "hf_hub_download", lambda repo, name: asked.append(name) or f"/tmp/{name}")
-    monkeypatch.setattr(embedder.Embedder, "__init__", lambda self, model, tokenizer, name: setattr(self, "name", name))
+    monkeypatch.setattr(embedder.Embedder, "__init__",
+                        lambda self, model, tokenizer, name, threads=None: setattr(self, "name", name))
     built = embedder.Embedder.default(embedder.FP32_ONNX)
     assert asked[0] == "onnx/model.onnx"
     assert built.name.endswith("onnx/model.onnx")
+
+
+@pytest.mark.parametrize("value, expected", [(None, None), ("", None), ("0", None), ("2", 2), (" 4 ", 4)])
+def test_threads_come_from_bgr_threads(monkeypatch, value, expected):
+    from board_game_reco.embedder import threads_from_env
+
+    if value is None:
+        monkeypatch.delenv("BGR_THREADS", raising=False)
+    else:
+        monkeypatch.setenv("BGR_THREADS", value)
+    assert threads_from_env() == expected
+
+
+def test_default_passes_the_thread_cap_to_the_session(monkeypatch):
+    import huggingface_hub
+
+    from board_game_reco import embedder
+
+    seen = {}
+    monkeypatch.setenv("BGR_THREADS", "2")
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", lambda repo, name: f"/tmp/{name}")
+    monkeypatch.setattr(embedder.Embedder, "__init__",
+                        lambda self, model, tokenizer, name, threads=None: seen.update(threads=threads))
+    embedder.Embedder.default()
+    assert seen == {"threads": 2}
+
+
+@pytest.mark.model
+def test_the_real_session_uses_the_thread_cap(monkeypatch):
+    monkeypatch.setenv("BGR_THREADS", "2")
+    encoder = Embedder.default()
+    options = encoder._session.get_session_options()
+    assert options.intra_op_num_threads == 2 and options.inter_op_num_threads == 1
+    assert encoder.encode(["a quick card game"]).shape == (1, 384)
