@@ -12,6 +12,10 @@ dependencies = [
 ]
 
 [dependency-groups]
+app = [
+    "seaborn>=0.13",
+    "streamlit>=1.40",
+]
 dev = [
     "pytest>=8",
     "scikit-learn>=1.5",
@@ -25,6 +29,9 @@ ragas = [
     "ragas>=0.4",
     "langchain-community<0.4",
 ]
+
+[tool.uv]
+default-groups = ["dev", "app"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
