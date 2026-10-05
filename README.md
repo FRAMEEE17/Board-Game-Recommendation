@@ -77,7 +77,7 @@ Each run writes `evals/results/<date>_<sha>/` with `summary.csv`, `rows.csv` and
 
 **Quantization.** int8 and fp32 disagree on two of 20 queries. "a game about pirates" gives Rum & Bones: Second Tide on int8 and Sail on fp32. "a quick card game" gives 6 nimmt! 25 Jahre on int8 and Last Will on fp32. Agreement meets the 0.95 target exactly.
 
-**Ragas.** `uv run --group ragas python -m evals.run ragas` is an optional faithfulness check through Ragas, outside the main install. The full run stopped at Groq's 200K daily token limit after about 20 of the 39 scores, so there is no Ragas number yet. Rerunning the same command later continues from the cached scores. The faithfulness number above comes from the judge's own prompt.
+**Ragas.** `uv run --group ragas python -m evals.run ragas` is an optional faithfulness check through Ragas, outside the main install. Mean Ragas faithfulness over the 39 template reasons is 0.74 (0 to 1). The first run stopped at Groq's 200K daily token limit after about 20 scores; the rerun finished the rest from the cache. Ragas splits each reason into claims and checks each one against the game's facts, so a reason with one unsupported claim out of four scores 0.75. The 1 to 5 faithfulness number above comes from the judge's own prompt.
 
 ## Status
 
