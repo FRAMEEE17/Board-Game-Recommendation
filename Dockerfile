@@ -67,10 +67,13 @@ ENTRYPOINT ["entrypoint"]
 CMD ["app"]
 
 # --- test: runtime plus pytest and scikit-learn, for the test and perf modes ---
-# Build the app image with `--target runtime`. Test-only packages stay out of it to keep it under 1 GB.
+# Test-only packages stay out of the app image to keep it under 1 GB.
 FROM runtime AS test
 USER root
 COPY --from=uv /uv /usr/local/bin/uv
 RUN UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1 \
     uv sync --frozen --no-install-project --no-default-groups --group app --group dev
 USER app
+
+# --- app: the last stage, so a plain `docker build .` and hosts that build the last stage get the app image ---
+FROM runtime AS app
