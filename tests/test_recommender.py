@@ -221,3 +221,96 @@ def test_with_llm_shares_catalog_classifier_and_weights(catalog):
     assert session._catalog is base._catalog
     assert session._classifier is base._classifier
     assert session._weights is base._weights
+
+
+def test_a_pick_carries_its_request_and_no_offers(catalog):
+    result = make(catalog).recommend("a game for 4 players")
+    assert result.request is not None and result.request.hard == HardConstraints(players=4)
+    assert result.offers == ()
+
+
+def test_relaxed_pick_offers_to_accept_or_keep_the_limit(catalog):
+    from board_game_reco.recommender import Offer
+
+    result = make(catalog).recommend("a game for 12 players in 5 minutes")
+    assert result.offers == (
+        Offer("Yes, no time limit"),
+        Offer("Keep 5 min", HardConstraints(players=12, max_minutes=5), relax=False),
+    )
+
+
+def test_relax_offer_names_the_relaxed_limit():
+    from board_game_reco.recommender import Offer, _relax_offers
+
+    offers = _relax_offers(HardConstraints(4, 20), HardConstraints(4, 30))
+    assert offers == (Offer("Yes, 30 min"), Offer("Keep 20 min", HardConstraints(4, 20), relax=False))
+
+
+def test_keep_the_limit_retries_without_parsing_and_without_relaxing(catalog):
+    llm = FakeLLM()
+    recommender = make(catalog, llm)
+    first = recommender.recommend("a game for 12 players in 5 minutes")
+    keep = first.offers[1]
+    again = recommender.retry(first, keep.hard, relax=keep.relax)
+    assert llm.calls == []  # no guard, no parse, no reason call: the request was read by the rules
+    assert again.game is None and again.relaxed == ()
+    assert "player count removed" in again.follow_up
+    assert [o.label for o in again.offers] == ["Ignore the player count", "Ignore the time limit"]
+
+
+def test_retry_never_parses_a_cloud_request_again(catalog):
+    reply = {"intent": "recommend", "players": 12, "max_minutes": 5, "youngest_age": None, "weight": None,
+             "coop": None, "solo": False, "first_time": False, "wants_new": False, "family": False,
+             "anchor": None, "designer": None, "shorter_than_anchor": False}
+    llm = FakeLLM(parsed=reply)
+    recommender = make(catalog, llm)
+    first = recommender.recommend("เกมสำหรับ 12 คน 5 นาที")
+    assert first.engine == "cloud" and llm.calls.count("json") == 1
+    recommender.retry(first, first.offers[1].hard, relax=False)
+    assert llm.calls.count("json") == 1 and llm.calls.count("guard") == 1
+
+
+def test_no_match_offers_one_button_per_constraint_that_removed_games(catalog):
+    result = make(catalog).recommend("a game for 20 players for my 2 year old")
+    assert [(o.label, o.hard, o.relax) for o in result.offers] == [
+        ("Ignore the player count", HardConstraints(None, None, 2), True),
+        ("Ignore the age limit", HardConstraints(20, None, None), True),
+    ]
+
+
+def test_no_match_after_the_engine_dropped_time_does_not_offer_time_again(catalog):
+    result = make(catalog).recommend("a game for 2 players in 5 minutes for my 3 year old")
+    assert result.game is None
+    assert "Ignore the time limit" not in [o.label for o in result.offers]
+
+
+def test_a_dropped_constraint_is_named_in_the_reason_across_retries(catalog):
+    recommender = make(catalog)
+    first = recommender.recommend("a game for 2 players in 5 minutes for my 3 year old")
+    second = recommender.retry(first, first.offers[0].hard, relax=True)  # ignore the player count
+    third = recommender.retry(second, second.offers[0].hard, relax=True)  # ignore the age limit
+    assert third.game is not None
+    assert satisfies(third.game, HardConstraints(None, 5, None)) is None
+    assert "I ignored the player count and the age limit" in third.reason
+    assert third.request.hard == HardConstraints(2, 5, 3)
+
+
+def test_cloud_reason_still_names_a_dropped_constraint(catalog):
+    reply = {"intent": "recommend", "players": 20, "max_minutes": None, "youngest_age": 2, "weight": None,
+             "coop": None, "solo": False, "first_time": False, "wants_new": False, "family": False,
+             "anchor": None, "designer": None, "shorter_than_anchor": False}
+    recommender = make(catalog, FakeLLM(parsed=reply, written="{name} เหมาะกับเด็ก"))
+    first = recommender.recommend("เกมสำหรับ 20 คน ลูกอายุ 2 ขวบ")
+    result = recommender.retry(first, first.offers[1].hard, relax=True)  # ignore the age limit
+    assert result.engine == "cloud" and result.game.name in result.reason
+    assert "I ignored the age limit" in result.reason
+
+
+def test_retry_refuses_a_result_without_a_recommend_request(catalog):
+    from board_game_reco.recommender import Recommendation
+
+    with pytest.raises(ValueError):
+        make(catalog).retry(Recommendation(None, "no request"), HardConstraints(4))
+    declined = make(catalog, intent="off_topic").recommend("what is the weather tomorrow")
+    with pytest.raises(ValueError):
+        make(catalog).retry(declined, HardConstraints(4))
