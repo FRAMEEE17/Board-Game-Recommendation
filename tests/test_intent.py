@@ -49,7 +49,7 @@ def test_confident_off_topic_is_declined_from_rules(catalog):
 
 def test_off_topic_label_with_no_field_is_declined_at_any_confidence(catalog):
     assert run("what is the capital of France", catalog, intent="off_topic", confidence=0.0).intent == "off_topic"
-    assert run("a relaxing nature game", catalog, intent="off_topic", confidence=0.0).intent == "off_topic"
+    assert run("something spooky with dice", catalog, intent="off_topic", confidence=0.0).intent == "off_topic"
 
 
 def test_unsure_compare_label_falls_back_to_recommend(catalog):
@@ -102,3 +102,36 @@ def test_real_classifier_separates_recommend_from_off_topic():
     classifier = IntentClassifier(Embedder.default())
     assert classifier.classify("recommend a board game for my family")[0] == "recommend"
     assert classifier.classify("what is the weather tomorrow")[0] == "off_topic"
+
+
+def test_shorter_than_anchor_reaches_the_request_on_rules(catalog):
+    request = run("something similar to Catan but shorter", catalog)
+    assert request.anchor == "catan" and request.shorter_than_anchor is True
+    assert request.hard.max_minutes is None
+
+
+def test_model_reply_can_ask_for_shorter_than_anchor(catalog):
+    reply = MODEL_REPLY | {"anchor": "Catan", "shorter_than_anchor": True}
+    request = run("เกมคล้าย Catan แต่สั้นกว่า", catalog, FakeLLM(parsed=reply))
+    assert request.engine == "cloud" and request.shorter_than_anchor is True
+
+
+def test_model_reply_with_a_non_bool_shorter_flag_is_rejected(catalog):
+    reply = MODEL_REPLY | {"shorter_than_anchor": "yes"}
+    assert run("เกมสั้นๆ", catalog, FakeLLM(parsed=reply)).intent == "unclear"
+
+
+def test_parse_schema_requires_every_field_including_shorter():
+    from board_game_reco.intent import PARSE_SCHEMA
+
+    assert set(PARSE_SCHEMA["required"]) == set(PARSE_SCHEMA["properties"])
+    assert "shorter_than_anchor" in PARSE_SCHEMA["required"]
+
+
+def test_parse_prompt_tells_the_model_booleans_are_never_null():
+    """Groq rejects the whole reply (400) when a non-nullable boolean comes back null, and every escalated request then falls back."""
+    from board_game_reco.intent import PARSE_SCHEMA, PARSE_SYSTEM
+
+    strict = [k for k, v in PARSE_SCHEMA["properties"].items() if v["type"] == "boolean"]
+    assert strict
+    assert all(k in PARSE_SYSTEM.split("except for", 1)[1].split("false when")[0] for k in strict)

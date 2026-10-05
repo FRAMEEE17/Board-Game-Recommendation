@@ -117,6 +117,7 @@ class Recommender:
             question = f'I could not find "{request.anchor}" in the catalog. Could you check the name?'
             return Recommendation(None, "", follow_up=question, engine=request.engine)
 
+        request = _shorter_than(request, anchor)
         pool, removed, hard, relaxed = self._pool(request, anchor)
         trace: dict[str, object] = {
             "catalog": len(self._catalog.games), "eligible": len(pool), "removed": removed, "engine": request.engine,
@@ -217,7 +218,7 @@ class Recommender:
 
     def _reason(self, request: Request, anchor: Game | None, pick: Scored, runners: list[Scored],
                 relaxed: tuple[str, ...], hard: HardConstraints) -> str:
-        template = _template(anchor, pick, runners, relaxed, hard)
+        template = _template(anchor, pick, runners, relaxed, hard, request.shorter_than_anchor)
         if self._llm is None or request.engine != "cloud":
             return template
         language = LANGUAGES.get(request.language, "the same language as this request: " + request.text)
@@ -235,6 +236,16 @@ def grounded(reason: str, game: Game, allowed_text: str) -> bool:
     return set(_NUMBER.findall(reason.replace(",", ""))) <= allowed
 
 
+def _shorter_than(request: Request, anchor: Game | None) -> Request:
+    """'Shorter than X' caps playtime just below X's. The anchor's playtime is known only here."""
+    if not request.shorter_than_anchor or anchor is None or anchor.max_minutes is None:
+        return request
+    limit = anchor.max_minutes - 1
+    if request.hard.max_minutes is not None:
+        limit = min(limit, request.hard.max_minutes)
+    return replace(request, hard=replace(request.hard, max_minutes=limit))
+
+
 def _minute_steps(minutes: int | None):
     if minutes is None:
         return [((), None)]
@@ -242,7 +253,7 @@ def _minute_steps(minutes: int | None):
 
 
 def _template(anchor: Game | None, pick: Scored, runners: list[Scored], relaxed: tuple[str, ...],
-              hard: HardConstraints) -> str:
+              hard: HardConstraints, shorter: bool = False) -> str:
     g = pick.game
     sentences = [f"{g.name} ({g.year or 'year unknown'}) plays {g.min_players}-{g.max_players} players"
                  + (f" in about {g.max_minutes} minutes." if g.max_minutes else ".")]
@@ -254,6 +265,11 @@ def _template(anchor: Game | None, pick: Scored, runners: list[Scored], relaxed:
         sentences.append(f"It is the closest match to {anchor.name} outside its family.")
     elif pick.terms.get("similarity", 0) > 0:
         sentences.append("It is the closest match to what you described.")
+    if anchor is not None and shorter:
+        if anchor.max_minutes is None:
+            sentences.append(f"I do not know how long {anchor.name} plays, so I could not look for a shorter game.")
+        elif g.max_minutes is not None and g.max_minutes < anchor.max_minutes:
+            sentences.append(f"It is shorter than {anchor.name}, which takes about {anchor.max_minutes} minutes.")
     if "coop" in pick.terms and pick.terms["coop"] > 0:
         sentences.append("It is co-operative.")
     if "new" in pick.terms:

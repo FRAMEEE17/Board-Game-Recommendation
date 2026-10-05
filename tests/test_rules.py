@@ -40,9 +40,15 @@ def rp(text):
         ("new releases for 2", "wants_new", True),
         ("new releases for 2", "players", 2),
         ("similar to Catan but shorter", "anchor", "catan"),
+        ("a game shorter than Catan", "anchor", "catan"),
         ("games by Uwe Rosenberg for 2", "designer", "Uwe Rosenberg"),
         ("games by Uwe Rosenberg for 2", "players", 2),
         ("a heavy economic game", "weight", "heavy"),
+        ("a relaxing nature game", "weight", "light"),
+        ("something chill for 4", "weight", "light"),
+        ("an easygoing game", "weight", "light"),
+        ("an easy-going game", "weight", "light"),
+        ("a laid-back game", "weight", "light"),
     ],
 )
 def test_reads_field(text, field, value):
@@ -51,7 +57,8 @@ def test_reads_field(text, field, value):
 
 @pytest.mark.parametrize(
     "text",
-    ["family game for 4, not too complicated", "a strategy game under an hour", "similar to Catan but shorter"],
+    ["family game for 4, not too complicated", "a strategy game under an hour", "similar to Catan but shorter",
+     "a relaxing nature game"],
 )
 def test_fully_read_requests_leave_nothing_unread(text):
     assert rp(text).unread == ()
@@ -67,3 +74,18 @@ def test_leftover_unit_word_is_unread():
 
 def test_unknown_anchor_is_not_taken():
     assert rp("I like heavy games").anchor is None
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("similar to Catan but shorter", True),
+        ("something like Splendor but quicker", True),
+        ("a game shorter than Catan", True),
+        ("a game shorter than an hour", False),
+        ("a faster game for 4", False),
+        ("similar to Catan", False),
+    ],
+)
+def test_shorter_counts_only_next_to_an_anchor(text, expected):
+    assert rp(text).shorter_than_anchor is expected

@@ -39,13 +39,15 @@ PROTOTYPES: dict[Intent, list[str]] = {
 }
 
 PARSE_SYSTEM = """You read requests for a board game recommendation, in any language.
-Return the fields of the schema. Use null when the request does not say.
+Return the fields of the schema. Use null when the request does not say, except for the true or false fields solo, first_time,
+wants_new, family and shorter_than_anchor: those are false when the request does not say.
 players: how many people will play. max_minutes: the longest playtime they accept.
 youngest_age: age of the youngest player. weight: light, medium or heavy.
 coop: true if they want a cooperative game, false if they reject one or want competition.
 first_time: they are new to board games. wants_new: they want recently released games.
 family: they want a game for a family or for children.
 anchor: a game they name as a reference, written as in the request. designer: a designer they name.
+shorter_than_anchor: true if they want a game shorter or quicker than the anchor game.
 intent: recommend, compare (two named games), another (they want a different pick),
 off_topic (not about board games), unclear (you cannot tell what they want)."""
 
@@ -53,7 +55,7 @@ PARSE_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
     "required": ["intent", "players", "max_minutes", "youngest_age", "weight", "coop", "solo",
-                 "first_time", "wants_new", "family", "anchor", "designer"],
+                 "first_time", "wants_new", "family", "anchor", "designer", "shorter_than_anchor"],
     "properties": {
         "intent": {"type": "string", "enum": ["recommend", "compare", "another", "off_topic", "unclear"]},
         "players": {"type": ["integer", "null"]},
@@ -67,6 +69,7 @@ PARSE_SCHEMA = {
         "family": {"type": "boolean"},
         "anchor": {"type": ["string", "null"]},
         "designer": {"type": ["string", "null"]},
+        "shorter_than_anchor": {"type": "boolean"},
     },
 }
 
@@ -86,6 +89,7 @@ class Request:
     family: bool = False
     anchor: str | None = None
     designer: str | None = None
+    shorter_than_anchor: bool = False
     unread: tuple[str, ...] = ()
     language: str = "latin"
     engine: Literal["rules", "cloud"] = "rules"
@@ -170,6 +174,7 @@ def _from_rules(text: str, intent: Intent, rules: RuleParse, language: str) -> R
         family=rules.family,
         anchor=rules.anchor,
         designer=rules.designer,
+        shorter_than_anchor=rules.shorter_than_anchor,
         language=language,
     )
 
@@ -191,6 +196,9 @@ def _from_model(text: str, reply: dict, language: str) -> Request | None:
     for key in ("anchor", "designer"):
         if reply.get(key) is not None and not isinstance(reply[key], str):
             return None
+    shorter = reply.get("shorter_than_anchor", False)
+    if type(shorter) is not bool:
+        return None
     return Request(
         text=text,
         intent=reply["intent"],
@@ -203,6 +211,7 @@ def _from_model(text: str, reply: dict, language: str) -> Request | None:
         family=reply["family"],
         anchor=reply["anchor"],
         designer=reply["designer"],
+        shorter_than_anchor=shorter and reply["anchor"] is not None,
         language=language,
         engine="cloud",
     )
