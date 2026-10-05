@@ -29,8 +29,10 @@ testpaths = ["tests"]
 markers = [
     "model: loads the real ONNX model (downloads about 118 MB once)",
     "network: calls Groq and needs LLM_API_KEY",
+    "fp32: loads the real fp32 model (downloads 471 MB), never run in the image",
+    "map: needs the map dependency group (umap-learn)",
 ]
-addopts = "-m 'not network'"
+addopts = "-m 'not network and not map'"
 
 [build-system]
 requires = ["hatchling"]
