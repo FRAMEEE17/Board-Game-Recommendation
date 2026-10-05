@@ -11,7 +11,7 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-default-groups --group dev --group app
+    uv sync --frozen --no-install-project --no-default-groups --group app
 
 # --- assets: downloads the int8 model for the target arch, builds vectors and the map ---
 FROM deps AS assets
@@ -54,9 +54,10 @@ ENV PATH=/app/.venv/bin:$PATH \
     STREAMLIT_SERVER_HEADLESS=true \
     STREAMLIT_SERVER_FILE_WATCHER_TYPE=none
 # No key may reach the image. .dockerignore drops .env; this fails the build if one slips through.
+# /app and /opt/hf stay root-owned, so the app user cannot write there. A recursive chmod would
+# copy the whole virtualenv into a new layer (905 MB) for no gain.
 RUN test ! -e /app/.env \
  && chmod 0755 /usr/local/bin/entrypoint \
- && chmod -R a-w /app /opt/hf \
  && python -c "import board_game_reco, app.state"
 USER app
 EXPOSE 8501
@@ -64,3 +65,12 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=20s \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health')"
 ENTRYPOINT ["entrypoint"]
 CMD ["app"]
+
+# --- test: runtime plus pytest and scikit-learn, for the test and perf modes ---
+# Build the app image with `--target runtime`. Test-only packages stay out of it to keep it under 1 GB.
+FROM runtime AS test
+USER root
+COPY --from=uv /uv /usr/local/bin/uv
+RUN UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1 \
+    uv sync --frozen --no-install-project --no-default-groups --group app --group dev
+USER app
