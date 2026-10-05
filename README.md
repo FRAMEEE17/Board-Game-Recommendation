@@ -1,165 +1,91 @@
 # Board Game Recommendation
 
-A Python microservice that takes a free-text request in any language and recommends
-exactly 1 board game, with a reason, grounded in a real catalog
-(BoardGameGeek data, ~2,000 games with descriptions, categories, and mechanics).
-
-## Pipeline
-
-- **Offline** (run once): preprocess the catalog, build a combined text field per
-  game, embed it with a local multilingual int8 ONNX model and cache the vectors.
-- **Online** (per request): rules read the constraints they can (players, playtime,
-  age, complexity, anchor game). Requests the rules read in full never call a model.
-  When part of a request is left unread, it goes to Groq (`openai/gpt-oss-20b`) behind
-  a prompt-injection guard. The catalog is hard-filtered, candidates are ranked by
-  embedding similarity blended with rating, and the pick is checked against the
-  constraints before a reason is written.
-- **Guardrail**: if the hard filter empties the candidate pool, only playtime is
-  relaxed: 1.5x first, then dropped. Player count and age are never relaxed. The
-  relaxation is stated explicitly in the response, never silently.
-- **No model available**: with no key, or when the call fails, the service asks one
-  question back instead of guessing.
+Free text in any language, one board game and a reason out, from about 2,000
+BoardGameGeek games. Rules and a local multilingual embedding model (int8 ONNX)
+answer every request they can read in full, with no network call. Groq is used only
+when part of a request is left unread. Player count and age always filter. Only
+playtime is relaxed (1.5x, then dropped), and the answer says so.
 
 ## Run
 
 ```bash
-uv run python -m board_game_reco "family game for 4 under an hour" --trace
+uv run python -m board_game_reco "family game for 4 under an hour"   # CLI
+uv run streamlit run app/main.py                                      # app at http://localhost:8501
 ```
 
-`uv` installs Python 3.12 if the machine lacks it. The first run downloads the int8
-embedding model (118 MB) and builds the vectors once.
+`uv` installs Python 3.12. The first run downloads the model (118 MB).
 
-For other languages, put a Groq key in `.env`:
+For other languages and unusual phrasing, paste a Groq key in the app sidebar, or set
+`LLM_API_KEY` in `.env` for the CLI. Without a key the service asks a question back
+instead of guessing. Queries that need the key:
 
-```
-LLM_API_KEY=...
-```
+- `a game for my kids, they are 5, 12 and 7 and playing with me`
+- `家族4人で30分くらいで遊べるゲーム`
+- `อยากได้เกมเล่น 4 คน ไม่เกินหนึ่งชั่วโมง`
 
-The CLI reads the key from `LLM_API_KEY` and talks to
-`https://api.groq.com/openai/v1`. Without a key, requests the rules cannot read in
-full get a question back instead of a guess.
+The stats page draws a game map from a one-time build:
+`uv run --group map python -m board_game_reco.build`.
 
-## Run the app
+Docker (verified on linux/arm64):
+`docker buildx build --target runtime -t board-game-reco --load . && docker run --rm -p 8501:8501 board-game-reco`
+
+## Test
 
 ```bash
-uv run streamlit run app/main.py
+uv run pytest                                        # 248 tests, no key or network needed
+uv run python -m evals.run                           # parse, route, recommend, perf
+uv run python -m evals.run judge relevance explain   # needs LLM_API_KEY
+docker buildx build --target test -t board-game-reco:test --load . \
+  && docker run --rm --network none board-game-reco:test test
 ```
 
-Sunday-Morning opens at http://localhost:8501 with two pages, Recommend and
-Catalog stats. Basic mode, which uses rules and the local model, is always on.
-Paste a Groq key in the sidebar to turn on Cloud AI for that browser session. The
-key lives only in that session: the app never reads `LLM_API_KEY` or `.env`, so a
-key set on the server cannot become every visitor's key. The CLI and the evals
-still read `.env`.
-
-When a request needs loosening, the answer offers buttons. "Yes, 30 min" accepts
-the relaxed pick. "Keep 20 min" and "Ignore the age limit" run the same request
-again with those limits, without asking the model to read it again. Player count
-and age are only dropped when the person presses that button, and the reason then
-says so.
-
-The game map on the stats page is built once:
-
-```bash
-uv run --group map python -m board_game_reco.build --expect-arch "$(uname -m)"
-```
-
-Without it the page says the map is not built. `umap-learn` is in the optional
-`map` group because it pulls in numba and llvmlite, which the app does not need at
-runtime.
-
-The app serves one person at a time (N12). Several sessions share one model in
-memory, and nothing is tuned for concurrent load.
-
-## Docker
-
-```bash
-docker buildx build --platform linux/arm64 --target runtime -t board-game-reco:arm64 --load .
-docker run --rm -p 8501:8501 board-game-reco:arm64             # the app
-docker run --rm board-game-reco:arm64 cli "family game for 4"  # the CLI
-
-# Tests and latency need pytest and scikit-learn, which only the test target carries.
-docker buildx build --platform linux/arm64 --target test -t board-game-reco:arm64-test --load .
-docker run --rm --network none board-game-reco:arm64-test test # the test suite, offline
-docker run --rm --network none board-game-reco:arm64-test perf # Basic latency, no fp32 download
-```
-
-The app listens on port 8501 inside the container. Build the app image with
-`--target runtime`. The `--target test` image adds pytest and scikit-learn for the
-test suite.
-
-- One image per arch, `linux/arm64` and `linux/amd64`, each with its own int8
-  model. The build downloads the model and builds the vectors and the game map,
-  so a container starts with no download and no encoding.
-- The arm64 runtime image is 909 MB on disk and 321 MB compressed. The arm64 test
-  target is 1,176 MB on disk. This Docker engine reports compressed size through
-  `docker image inspect`, so on-disk size was measured with `du` inside the
-  container.
-- The container runs as uid 10001 with `HF_HUB_OFFLINE=1`. The code, the model
-  and the vectors are read-only. It also runs with `--read-only --tmpfs /tmp
-  --tmpfs /home/app`.
-- No key is in the image. `.dockerignore` drops `.env`, and the build fails if a
-  `.env` file reaches `/app`. Give the key in the app's sidebar.
-- `BGR_THREADS=2` caps onnxruntime's threads to match a 2-CPU limit. Set it to
-  the CPU count you give the container.
-- The dependency stage built for `linux/amd64`. The assets stage, including the
-  UMAP map build under QEMU emulation, is slow. The amd64 runtime image is not
-  verified end to end on this machine. An amd64 host or CI runner should run
-  `docker buildx build --platform linux/amd64 --target runtime .` followed by the
-  test command.
-- The amd64 model needs a CPU with AVX2. On Apple Silicon, use the arm64 image.
-  An amd64 image under emulation may crash on load.
-
-## Evaluation
-
-```bash
-uv run python -m evals.run                                 # parse, route, recommend, perf: no key needed
-uv run python -m evals.run judge relevance tune explain    # calls the judge, needs LLM_API_KEY
-uv run pytest                                              # invariants that must never break
-```
-
-Each run writes `evals/results/<date>_<sha>/` with `summary.csv`, `rows.csv` and the charts.
-
-- The judge is `qwen/qwen3.8-27b` on Groq in thinking mode. Its scores vary between runs, so the judge suite scores every row twice and reports the spread. It is measured against `evals/gold/judge.jsonl` before its relevance scores are used.
-- Judge scores are cached in `.cache/judge/`, keyed by the prompt version. A rerun pays only for new (query, game) pairs.
-- Groq's free tier gives the judge 8K tokens a minute and 200K a day. The judge suites together can need more than one day. When the daily quota runs out, the run stops, keeps every cached score, and the same command continues later.
-- Every gold row in `evals/gold/` was drafted by a model and checked by scripts against the catalog. That includes the faithful and corrupted reasons in `judge.jsonl`. No person reviewed the labels.
-- `perf` measures Basic-mode latency on the machine it runs on. The 2-CPU Docker measurement comes with the Docker image. The first `perf` run downloads the fp32 model (471 MB) for the int8 comparison.
-
-### Results
+## Results
 
 | Check | Result |
 |---|---|
-| Judge AUROC on the judge gold set (two runs) | 1.0 and 1.0 |
-| `grounded()` check on corrupted reasons | catches 0.333 of them (TPR), flags 0.0 of the faithful ones (FPR) |
-| Mean judge relevance, dev split | 3.55 |
-| Mean judge relevance, test split | 3.84 |
-| Reason grounding pass rate | 1.0 (39 reasons) |
-| Mean judge faithfulness of reasons | 3.08, none scored 5 |
-| Basic latency (N3, dev machine) | p50 2.48 ms, p95 11.04 ms |
-| Cloud latency (N4, 20 escalated requests, 0 fallbacks) | p50 1453 ms, p95 1675 ms |
-| int8 against fp32 top-1 agreement (N13) | 0.95 (19 of 20) |
-| Image size (N7), arm64 / amd64 | arm64 runtime: 909 MB on disk, 321 MB compressed; arm64 test target: 1,176 MB on disk; amd64: not verified end to end on this machine |
-| Offline tests in the container (N1), arm64 / amd64 | arm64: 248 passed, 1 skipped, 6 deselected under `--network none` and also with `--read-only --tmpfs /tmp --tmpfs /home/app`; amd64: not verified end to end on this machine |
-| Tests under `--cpus=2 --memory=2g` (N8) | arm64: 248 passed, 1 skipped, 6 deselected |
-| Basic latency on 2 CPUs (N3), with and without `BGR_THREADS=2` | with `BGR_THREADS=2`: p50 5.9 ms, p95 63 ms over 100 requests; with `BGR_THREADS` empty: p95 68 ms; target 200 ms |
-| Cold start (N5): health, then engine ready | 1.9 s total: health after 0.7 s, first engine build 1.2 s; target 10 s |
-| Peak memory of the engine (N6) | peak RSS 512 MB; target 1 GB |
-| Key in image layers (N11) | no `.env` file in the image, no key found in any layer, `docker history` shows no key |
-| Game map method in the image | UMAP map build |
+| Unit and gold tests | 248 passed locally, and in the container under `--network none` and `--cpus=2 --memory=2g` |
+| Picks that break a stated limit | 0 of the gold recommend rows (constraint satisfaction 1.0) |
+| Intent accuracy, test split | 1.0 |
+| Field accuracy without a key | English 0.99, Thai 0.78, other languages 0.63 |
+| Router (rules or model?) | AUROC 0.88, sends 94% of the requests the rules misread to the model |
+| Judge AUROC on corrupted reasons | 1.0 on both runs. The plain `grounded()` check catches 0.33 |
+| Mean relevance of the pick (1 to 5) | 3.55 dev, 3.84 test |
+| Faithfulness of reasons | Ragas 0.74, grounding check 100% |
+| Latency | Basic p95 63 ms on 2 CPUs, cloud p95 1.7 s |
+| Cold start, memory, image | 1.9 s, 512 MB peak, 909 MB on disk |
+| int8 against fp32, same top pick | 95% (19 of 20) |
+| API key in the image | none |
 
-**Judge validation.** The judge was checked on `judge.jsonl`, where half the reasons are corrupted on purpose. Both runs reached AUROC 1.0, well above the 0.75 gate, so its relevance scores were used. The plain `grounded()` string check is weaker. It catches a third of the corrupted reasons and flags none of the faithful ones.
+Known limits:
 
-**Weight tuning.** Nine settings of `similarity` (0.6, 1.0, 1.4) and `rating` (0.2, 0.4, 0.8) were scored on the dev split. The best was similarity 0.6 and rating 0.2 at 3.60, against 3.55 for the defaults. That gain of 0.05 is within the judge's run-to-run noise, and the test split did not move (3.84 either way). The defaults stay at similarity 1.0 and rating 0.4.
+- The gold rows were drafted by a model and checked by scripts against the catalog. No
+  person reviewed the labels.
+- "Similar to X" compares descriptions only. "similar to Pandemic" returns Virus! and
+  "like Catan but shorter" (in Thai) returns Eat Poop You Cat.
+- The amd64 image builds its dependencies but was not verified end to end.
 
-**Known limitations.** The judge flagged two weak picks. "best strategy game ever" returns Roll Player Adventures, which scored 1. "something similar to Pandemic" returns Virus!, which scored 2. Neither is fixed by reweighting.
+## Pictures
 
-**Quantization.** int8 and fp32 disagree on two of 20 queries. "a game about pirates" gives Rum & Bones: Second Tide on int8 and Sail on fp32. "a quick card game" gives 6 nimmt! 25 Jahre on int8 and Last Will on fp32. Agreement meets the 0.95 target exactly.
+<p>
+<img src="docs/images/app-recommend.png" width="48%" alt="Recommend page">
+<img src="docs/images/app-why.png" width="48%" alt="Why this game: score terms and runners-up">
+</p>
+<p>
+<img src="docs/images/app-stats-charts.png" width="48%" alt="Catalog charts">
+<img src="docs/images/app-stats-table.png" width="48%" alt="Filterable catalog table">
+</p>
+With a Groq key, the badge reads "Cloud AI". The model reads the request, and the engine
+still filters and checks the pick:
 
-**Ragas.** `uv run --group ragas python -m evals.run ragas` is an optional faithfulness check through Ragas, outside the main install. Mean Ragas faithfulness over the 39 template reasons is 0.74 (0 to 1). The first run stopped at Groq's 200K daily token limit after about 20 scores; the rerun finished the rest from the cache. Ragas splits each reason into claims and checks each one against the game's facts, so a reason with one unsupported claim out of four scores 0.75. The 1 to 5 faithfulness number above comes from the judge's own prompt.
+<p>
+<img src="docs/images/app-cloud.png" width="48%" alt="Cloud AI reads an English request with three ages">
+<img src="docs/images/app-cloud-why.png" width="48%" alt="Why this game: how many games each limit removed">
+</p>
+<p>
+<img src="docs/images/app-cloud-thai.png" width="48%" alt="A Thai request answered in Thai">
+</p>
 
-## Status
-
-Waves 1 and 2 are implemented: the engine, the evaluation suites, the
-Sunday-Morning app and the Docker image. Wave 3 adds "Another game" and "Not for
-me", comparing two games, the data modes and a FastAPI endpoint.
+<p>
+<img src="docs/images/roc-router.png" width="40%" alt="Router ROC">
+<img src="docs/images/roc-judge.png" width="40%" alt="Judge ROC">
+</p>
