@@ -1,10 +1,6 @@
 # syntax=docker/dockerfile:1.7
-# Three stages. deps: the runtime virtualenv. assets: model files, vectors and the game map, the only
-# stage with network access and umap-learn. runtime: what ships, non-root, offline.
 ARG PY=python:3.12-slim
 FROM ghcr.io/astral-sh/uv:0.12 AS uv
-
-# --- deps: the virtualenv from the lock, no project code, so code edits do not reinstall packages ---
 FROM ${PY} AS deps
 COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
@@ -12,8 +8,6 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-default-groups --group app
-
-# --- assets: downloads the int8 model for the target arch, builds vectors and the map ---
 FROM deps AS assets
 ARG TARGETARCH
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -25,7 +19,6 @@ ENV HF_HOME=/opt/hf PYTHONPATH=/app
 # the build if that file does not match the platform buildx was asked for.
 RUN .venv/bin/python -m board_game_reco.build --cache /app/.cache --expect-arch "${TARGETARCH:-$(uname -m)}"
 
-# --- runtime: no umap, no numba, no network needed ---
 FROM ${PY} AS runtime
 RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin app
 WORKDIR /app
@@ -66,7 +59,6 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=20s \
 ENTRYPOINT ["entrypoint"]
 CMD ["app"]
 
-# --- test: runtime plus pytest and scikit-learn, for the test and perf modes ---
 # Test-only packages stay out of the app image to keep it under 1 GB.
 FROM runtime AS test
 USER root
@@ -75,5 +67,5 @@ RUN UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1 \
     uv sync --frozen --no-install-project --no-default-groups --group app --group dev
 USER app
 
-# --- app: the last stage, so a plain `docker build .` and hosts that build the last stage get the app image ---
+# app: the last stage, so a plain `docker build .` and hosts that build the last stage get the app image
 FROM runtime AS app
