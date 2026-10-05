@@ -1,11 +1,11 @@
 # Board Game Recommendation
 
 Type what you want in any language and get one board game back, with a reason. It picks
-from about 2,000 BoardGameGeek games.
+from about 2,000 BoardGameGeek games. [https://www.kaggle.com/datasets/andrewmvd/board-games]
 
 Most requests never leave the machine. Plain rules read the player count, time and age,
 and a small local model ranks the games. A cloud model (Groq) only steps in when the
-rules can't read the whole request, mostly non-English text. Player count and age always
+rules can't read the whole request, likely non-English text. Player count and age always
 filter, because a game the group can't play is the worst answer. If nothing fits, only
 playtime loosens (1.5x, then dropped), and the answer says so.
 
@@ -67,7 +67,7 @@ What to tune next:
 2. Measure Thai and other languages with the key, then fix the misses.
 3. Reword or ground the generic sentences in the reasons to lift faithfulness above 0.74.
 
-## Pictures
+## Appendix
 
 <p>
 <img src="docs/images/app-recommend.png" width="48%" alt="Recommend page">
