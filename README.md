@@ -109,9 +109,22 @@ choose the game.
 <img src="docs/images/roc-judge.png" width="40%" alt="Judge ROC">
 </p>
 
-Router: the rules' own "couldn't read this" flag catches 81% of misses for about 10% extra
-cloud calls. The combined router catches 94% for about 19%. Catching all of them would
-cost about half of the correct requests. The confidence signal alone (green) is weak.
+>> Router
 
-Judge: both runs sit in the top-left corner. The black square is the cheap check. It
-raises no false alarms but misses two thirds of the bad reasons.
+The router is a binary classifier. A request is positive (y = 1) when the rule parser misreads it, meaning at least one gold field is wrong or the true intent is unclear. The prediction is "escalate to the cloud model". I evaluated it on the test split: 37 rows, 16 positive and 21 negative.
+
+- Axes: TPR is the recall of rule failures. FPR is the share of correctly parsed requests that get escalated anyway, which is the cost of unnecessary cloud calls.
+- Unread and non-Latin flags: each is a binary indicator, so its ROC is two straight segments through a single operating point. Together they sit at TPR 0.81 (13/16) and FPR 0.095 (2/21). The AUROC of 0.86 equals the balanced accuracy of that classifier.
+- Deployed rule (the OR of the two flags): TPR 0.94 (15/16) at FPR 0.19 (4/21), with AUROC 0.88. Reaching 100% recall would need an FPR of about 0.52, so the extra recall is not worth it.
+- Confidence signal (1 minus the margin): a continuous score with an AUROC of only 0.65. It discriminates weakly, so almost all of the router's value comes from the "could not read this" flags.
+
+Caveat: with 16 positives, a recall of 15/16 has a wide 95% confidence interval (Clopper-Pearson, roughly 0.70 to 0.99). Treat it as a trend, not a precise estimate.
+
+>> Judge
+
+The judge detects unfaithful explanations. Positives are the 15 reasons we corrupted on purpose, and negatives are the 15 faithful ones. The judge's 1 to 5 faithfulness rating is the ranking score.
+
+- AUROC 1.0 on both runs: the classes separate perfectly. Every corrupted reason scores below every faithful one. The two ROC curves overlap, so sampling at temperature 1.0 did not change the ranking (mean absolute score difference between runs: 0.17).
+- The black square (grounded()): a deterministic rule check, so it is a single operating point at FPR 0 and TPR 0.33 (5/15). Precision is 1.0 but recall is low, because it only checks game names and numbers. It catches swapped numbers and misses invented claims entirely.
+
+Caveat: n is 15 per class, and the negatives are synthetic corruptions we generated ourselves. AUROC 1.0 is therefore an upper bound, not an estimate of performance on natural errors, which are harder to separate.
