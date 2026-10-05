@@ -1,13 +1,16 @@
 # evals/run.py
-"""python -m evals.run [suite ...]
+"""python -m evals.run [suite ...] [--no-fp32]
 
 No arguments runs the suites that need no key: parse, route, recommend, perf.
 The suites that call the judge run only when named: judge, relevance, tune, explain, ragas.
 explain without a key still reports the grounding pass rate.
+--no-fp32 skips the int8 against fp32 comparison in perf, which downloads 471 MB. The Docker
+image runs perf this way, with no network. BGR_RESULTS moves the output folder.
 """
 from __future__ import annotations
 
 import csv
+import os
 import subprocess
 import sys
 from datetime import date
@@ -21,9 +24,26 @@ from evals.perf import escalated_texts, perf_suite
 from evals.quality import explain_suite, judge_suite, relevance_cases, relevance_suite, tune_suite
 from evals.suites import parse_suite, recommend_suite, route_suite
 
-RESULTS = Path(__file__).resolve().parent / "results"
+RESULTS = Path(os.environ.get("BGR_RESULTS") or Path(__file__).resolve().parent / "results")
 OFFLINE = ("parse", "route", "recommend", "perf")
 NETWORK = ("judge", "relevance", "tune", "explain", "ragas")
+
+
+def split_flags(argv: list[str]) -> tuple[list[str], set[str]]:
+    flags = {a for a in argv if a.startswith("--")}
+    unknown = flags - {"--no-fp32"}
+    if unknown:
+        raise SystemExit(f"unknown flag: {', '.join(sorted(unknown))}. The only flag is --no-fp32")
+    return [a for a in argv if not a.startswith("--")], flags
+
+
+def git_sha() -> str:
+    """Short commit hash, or "nogit" where git is missing, as in the Docker image."""
+    try:
+        done = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True)
+    except OSError:
+        return "nogit"
+    return done.stdout.strip() or "nogit"
 
 
 def select(names: list[str]) -> list[str]:
@@ -46,9 +66,9 @@ def fp32_recommender() -> Recommender:
 
 
 def main(argv: list[str]) -> None:
-    names = select(argv)
-    sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
-    out = RESULTS / f"{date.today().isoformat()}_{sha or 'nogit'}"
+    names, flags = split_flags(argv)
+    names = select(names)
+    out = RESULTS / f"{date.today().isoformat()}_{git_sha()}"
     out.mkdir(parents=True, exist_ok=True)
 
     recommender = Recommender.default()
@@ -74,7 +94,8 @@ def main(argv: list[str]) -> None:
         results["recommend"] = recommend_suite(gold_recommend, by_id, recommender)
     if "perf" in names:
         results["perf"] = perf_suite(gold_parse, [c["text"] for c in cases], rules_only,
-                                     recommender if llm is not None else None, fp32_recommender(),
+                                     recommender if llm is not None else None,
+                                     None if "--no-fp32" in flags else fp32_recommender(),
                                      escalated_texts(gold_parse, catalog))
     try:
         if judge is not None and "judge" in names:
