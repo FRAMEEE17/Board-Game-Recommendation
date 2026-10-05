@@ -1,0 +1,10 @@
+# Sunday-Morning palette. The Docker image adds headless mode and turns off the file watcher.
+[theme]
+base = "light"
+primaryColor = "#FB923C"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#FFF7ED"
+textColor = "#1F2937"
+
+[browser]
+gatherUsageStats = false
