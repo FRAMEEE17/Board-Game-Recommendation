@@ -56,14 +56,6 @@ docker buildx build --target test -t board-game-reco:test --load . \
 | int8 against fp32, same top pick | 95% (19 of 20) |
 | API key in the image | none |
 
-Known limits:
-
-- The gold rows were drafted by a model and checked by scripts against the catalog. No
-  person reviewed the labels.
-- "Similar to X" compares descriptions only. "similar to Pandemic" returns Virus! and
-  "like Catan but shorter" (in Thai) returns Eat Poop You Cat.
-- The amd64 image builds its dependencies but was not verified end to end.
-
 ## Pictures
 
 <p>
