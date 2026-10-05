@@ -81,6 +81,16 @@ class Recommendation:
     trace: dict[str, object] = field(default_factory=dict)
 
 
+class _FromEnv:
+    """Default for Recommender.default: read the key from the environment, as the CLI does."""
+
+    def __repr__(self) -> str:
+        return "FROM_ENV"
+
+
+FROM_ENV = _FromEnv()
+
+
 class Recommender:
     def __init__(self, catalog: Catalog, classifier, llm: LLM | None, weights: Weights = Weights()) -> None:
         self._catalog = catalog
@@ -89,12 +99,17 @@ class Recommender:
         self._weights = weights
 
     @classmethod
-    def default(cls) -> Recommender:
+    def default(cls, llm: LLM | None | _FromEnv = FROM_ENV) -> Recommender:
+        """No argument: the model comes from LLM_API_KEY, as today. llm=None: no model, no environment read."""
         from .embedder import Embedder
 
         encoder = Embedder.default()
         catalog = Catalog.load(ROOT / "data" / "boardgames.csv", ROOT / ".cache" / "vectors", encoder)
-        return cls(catalog, IntentClassifier(encoder), LLM.from_env())
+        return cls(catalog, IntentClassifier(encoder), LLM.from_env() if isinstance(llm, _FromEnv) else llm)
+
+    def with_llm(self, llm: LLM | None) -> Recommender:
+        """Same catalog, classifier and weights, another model. Nothing heavy is copied."""
+        return Recommender(self._catalog, self._classifier, llm, self._weights)
 
     @property
     def llm(self) -> LLM | None:

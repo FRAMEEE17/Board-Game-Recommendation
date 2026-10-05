@@ -180,3 +180,44 @@ def test_shorter_than_a_game_with_unknown_playtime_says_so(catalog):
              "anchor": "Chess", "designer": None, "shorter_than_anchor": True}
     result = make(catalog, FakeLLM(parsed=reply)).recommend("เกมคล้าย Chess แต่สั้นกว่า")
     assert "I do not know how long Chess plays" in result.reason
+
+
+def test_default_with_no_model_never_reads_the_environment(catalog, monkeypatch):
+    from board_game_reco import embedder, recommender
+    from board_game_reco.llm import LLM
+    from tests.conftest import FakeEncoder
+
+    monkeypatch.setattr(embedder.Embedder, "default", classmethod(lambda cls, *a, **k: FakeEncoder()))
+    monkeypatch.setattr(recommender.Catalog, "load", classmethod(lambda cls, *a: catalog))
+    monkeypatch.setattr(recommender, "IntentClassifier", lambda encoder: StubClassifier())
+
+    def no_env(cls, *a, **k):
+        raise AssertionError("LLM.from_env must not run")
+
+    monkeypatch.setattr(LLM, "from_env", classmethod(no_env))
+    assert Recommender.default(llm=None).llm is None
+    given = FakeLLM()
+    assert Recommender.default(llm=given).llm is given
+
+
+def test_default_with_no_argument_still_reads_the_environment(catalog, monkeypatch):
+    from board_game_reco import embedder, recommender
+    from board_game_reco.llm import LLM
+    from tests.conftest import FakeEncoder
+
+    monkeypatch.setattr(embedder.Embedder, "default", classmethod(lambda cls, *a, **k: FakeEncoder()))
+    monkeypatch.setattr(recommender.Catalog, "load", classmethod(lambda cls, *a: catalog))
+    monkeypatch.setattr(recommender, "IntentClassifier", lambda encoder: StubClassifier())
+    from_env = FakeLLM()
+    monkeypatch.setattr(LLM, "from_env", classmethod(lambda cls, *a, **k: from_env))
+    assert Recommender.default().llm is from_env
+
+
+def test_with_llm_shares_catalog_classifier_and_weights(catalog):
+    base = Recommender(catalog, StubClassifier(), None, Weights(rating=0.8))
+    llm = FakeLLM()
+    session = base.with_llm(llm)
+    assert session.llm is llm and base.llm is None
+    assert session._catalog is base._catalog
+    assert session._classifier is base._classifier
+    assert session._weights is base._weights
