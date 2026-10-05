@@ -69,3 +69,34 @@ def catalog(tmp_path_factory):
     from board_game_reco.catalog import Catalog
 
     return Catalog.load(CSV, tmp_path_factory.mktemp("vectors"), FakeEncoder())
+
+
+class CountingClassifier(StubClassifier):
+    """Counts parses: every recommend() classifies once, a retry never does."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.count = 0
+
+    def classify(self, text: str) -> tuple[str, float]:
+        self.count += 1
+        return super().classify(text)
+
+
+@pytest.fixture
+def engine(catalog, monkeypatch):
+    """Points the app's shared engine at the fake catalog. Yields the classifier and the build count."""
+    from app import state
+    from board_game_reco.recommender import Recommender
+
+    classifier = CountingClassifier()
+    builds = []
+
+    def build():
+        builds.append(1)
+        return Recommender(catalog, classifier, None)
+
+    monkeypatch.setattr(state, "_build", build)
+    state.shared.clear()
+    yield classifier, builds
+    state.shared.clear()

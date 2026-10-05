@@ -23,7 +23,7 @@ exactly 1 board game, with a reason, grounded in a real catalog
 ## Run
 
 ```bash
-uv run python -m board_game_reco "family game for 4, not too complicated" --trace
+uv run python -m board_game_reco "family game for 4 under an hour" --trace
 ```
 
 `uv` installs Python 3.12 if the machine lacks it. The first run downloads the int8
@@ -35,9 +35,80 @@ For other languages, put a Groq key in `.env`:
 LLM_API_KEY=...
 ```
 
-The app reads the key from `LLM_API_KEY` and talks to
+The CLI reads the key from `LLM_API_KEY` and talks to
 `https://api.groq.com/openai/v1`. Without a key, requests the rules cannot read in
 full get a question back instead of a guess.
+
+## Run the app
+
+```bash
+uv run streamlit run app/main.py
+```
+
+Sunday-Morning opens at http://localhost:8501 with two pages, Recommend and
+Catalog stats. Basic mode, which uses rules and the local model, is always on.
+Paste a Groq key in the sidebar to turn on Cloud AI for that browser session. The
+key lives only in that session: the app never reads `LLM_API_KEY` or `.env`, so a
+key set on the server cannot become every visitor's key. The CLI and the evals
+still read `.env`.
+
+When a request needs loosening, the answer offers buttons. "Yes, 30 min" accepts
+the relaxed pick. "Keep 20 min" and "Ignore the age limit" run the same request
+again with those limits, without asking the model to read it again. Player count
+and age are only dropped when the person presses that button, and the reason then
+says so.
+
+The game map on the stats page is built once:
+
+```bash
+uv run --group map python -m board_game_reco.build --expect-arch "$(uname -m)"
+```
+
+Without it the page says the map is not built. `umap-learn` is in the optional
+`map` group because it pulls in numba and llvmlite, which the app does not need at
+runtime.
+
+The app serves one person at a time (N12). Several sessions share one model in
+memory, and nothing is tuned for concurrent load.
+
+## Docker
+
+```bash
+docker buildx build --platform linux/arm64 --target runtime -t board-game-reco:arm64 --load .
+docker run --rm -p 8501:8501 board-game-reco:arm64             # the app
+docker run --rm board-game-reco:arm64 cli "family game for 4"  # the CLI
+
+# Tests and latency need pytest and scikit-learn, which only the test target carries.
+docker buildx build --platform linux/arm64 --target test -t board-game-reco:arm64-test --load .
+docker run --rm --network none board-game-reco:arm64-test test # the test suite, offline
+docker run --rm --network none board-game-reco:arm64-test perf # Basic latency, no fp32 download
+```
+
+The app listens on port 8501 inside the container. Build the app image with
+`--target runtime`. The `--target test` image adds pytest and scikit-learn for the
+test suite.
+
+- One image per arch, `linux/arm64` and `linux/amd64`, each with its own int8
+  model. The build downloads the model and builds the vectors and the game map,
+  so a container starts with no download and no encoding.
+- The arm64 runtime image is 909 MB on disk and 321 MB compressed. The arm64 test
+  target is 1,176 MB on disk. This Docker engine reports compressed size through
+  `docker image inspect`, so on-disk size was measured with `du` inside the
+  container.
+- The container runs as uid 10001 with `HF_HUB_OFFLINE=1`. The code, the model
+  and the vectors are read-only. It also runs with `--read-only --tmpfs /tmp
+  --tmpfs /home/app`.
+- No key is in the image. `.dockerignore` drops `.env`, and the build fails if a
+  `.env` file reaches `/app`. Give the key in the app's sidebar.
+- `BGR_THREADS=2` caps onnxruntime's threads to match a 2-CPU limit. Set it to
+  the CPU count you give the container.
+- The dependency stage built for `linux/amd64`. The assets stage, including the
+  UMAP map build under QEMU emulation, is slow. The amd64 runtime image is not
+  verified end to end on this machine. An amd64 host or CI runner should run
+  `docker buildx build --platform linux/amd64 --target runtime .` followed by the
+  test command.
+- The amd64 model needs a CPU with AVX2. On Apple Silicon, use the arm64 image.
+  An amd64 image under emulation may crash on load.
 
 ## Evaluation
 
@@ -68,6 +139,14 @@ Each run writes `evals/results/<date>_<sha>/` with `summary.csv`, `rows.csv` and
 | Basic latency (N3, dev machine) | p50 2.48 ms, p95 11.04 ms |
 | Cloud latency (N4, 20 escalated requests, 0 fallbacks) | p50 1453 ms, p95 1675 ms |
 | int8 against fp32 top-1 agreement (N13) | 0.95 (19 of 20) |
+| Image size (N7), arm64 / amd64 | arm64 runtime: 909 MB on disk, 321 MB compressed; arm64 test target: 1,176 MB on disk; amd64: not verified end to end on this machine |
+| Offline tests in the container (N1), arm64 / amd64 | arm64: 248 passed, 1 skipped, 6 deselected under `--network none` and also with `--read-only --tmpfs /tmp --tmpfs /home/app`; amd64: not verified end to end on this machine |
+| Tests under `--cpus=2 --memory=2g` (N8) | arm64: 248 passed, 1 skipped, 6 deselected |
+| Basic latency on 2 CPUs (N3), with and without `BGR_THREADS=2` | with `BGR_THREADS=2`: p50 5.9 ms, p95 63 ms over 100 requests; with `BGR_THREADS` empty: p95 68 ms; target 200 ms |
+| Cold start (N5): health, then engine ready | 1.9 s total: health after 0.7 s, first engine build 1.2 s; target 10 s |
+| Peak memory of the engine (N6) | peak RSS 512 MB; target 1 GB |
+| Key in image layers (N11) | no `.env` file in the image, no key found in any layer, `docker history` shows no key |
+| Game map method in the image | UMAP map build |
 
 **Judge validation.** The judge was checked on `judge.jsonl`, where half the reasons are corrupted on purpose. Both runs reached AUROC 1.0, well above the 0.75 gate, so its relevance scores were used. The plain `grounded()` string check is weaker. It catches a third of the corrupted reasons and flags none of the faithful ones.
 
@@ -81,5 +160,6 @@ Each run writes `evals/results/<date>_<sha>/` with `summary.csv`, `rows.csv` and
 
 ## Status
 
-Wave 1 (the recommendation engine) is implemented. Docker packaging, the judge and
-faithfulness suites, and the Streamlit pages come in wave 2.
+Waves 1 and 2 are implemented: the engine, the evaluation suites, the
+Sunday-Morning app and the Docker image. Wave 3 adds "Another game" and "Not for
+me", comparing two games, the data modes and a FastAPI endpoint.

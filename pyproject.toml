@@ -12,16 +12,26 @@ dependencies = [
 ]
 
 [dependency-groups]
+app = [
+    "seaborn>=0.13",
+    "streamlit>=1.40",
+]
 dev = [
     "pytest>=8",
     "scikit-learn>=1.5",
     "matplotlib>=3.9",
     "nbformat>=5.10",
 ]
+map = [
+    "umap-learn>=0.5",
+]
 ragas = [
     "ragas>=0.4",
     "langchain-community<0.4",
 ]
+
+[tool.uv]
+default-groups = ["dev", "app"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
@@ -29,8 +39,10 @@ testpaths = ["tests"]
 markers = [
     "model: loads the real ONNX model (downloads about 118 MB once)",
     "network: calls Groq and needs LLM_API_KEY",
+    "fp32: loads the real fp32 model (downloads 471 MB), never run in the image",
+    "map: needs the map dependency group (umap-learn)",
 ]
-addopts = "-m 'not network'"
+addopts = "-m 'not network and not map'"
 
 [build-system]
 requires = ["hatchling"]

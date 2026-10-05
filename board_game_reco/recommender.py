@@ -32,6 +32,8 @@ CONSTRAINT_LABELS = {
     "same_family": "same family as the game you named",
     "designer": "designer",
 }
+# What a follow-up button calls a hard constraint the person can choose to drop.
+LOOSEN_LABELS = {"players": "player count", "max_minutes": "time limit", "youngest_age": "age limit"}
 DECLINES = {
     "off_topic": "I can only help with board games. Tell me who is playing, how long you have, or a game you like.",
     "injection": "I can't help with that request. Ask me for a board game instead.",
@@ -70,6 +72,15 @@ class Scored:
 
 
 @dataclass(frozen=True)
+class Offer:
+    """One follow-up button. hard=None accepts what is already shown and needs no engine call."""
+
+    label: str
+    hard: HardConstraints | None = None
+    relax: bool = False  # whether a retry may still relax playtime
+
+
+@dataclass(frozen=True)
 class Recommendation:
     game: Game | None
     reason: str
@@ -79,6 +90,18 @@ class Recommendation:
     engine: str = "rules"
     terms: dict[str, float] = field(default_factory=dict)
     trace: dict[str, object] = field(default_factory=dict)
+    request: Request | None = None  # the parsed request, so a retry skips the parse
+    offers: tuple[Offer, ...] = ()  # buttons that answer follow_up
+
+
+class _FromEnv:
+    """Default for Recommender.default: read the key from the environment, as the CLI does."""
+
+    def __repr__(self) -> str:
+        return "FROM_ENV"
+
+
+FROM_ENV = _FromEnv()
 
 
 class Recommender:
@@ -89,12 +112,17 @@ class Recommender:
         self._weights = weights
 
     @classmethod
-    def default(cls) -> Recommender:
+    def default(cls, llm: LLM | None | _FromEnv = FROM_ENV) -> Recommender:
+        """No argument: the model comes from LLM_API_KEY, as today. llm=None: no model, no environment read."""
         from .embedder import Embedder
 
         encoder = Embedder.default()
         catalog = Catalog.load(ROOT / "data" / "boardgames.csv", ROOT / ".cache" / "vectors", encoder)
-        return cls(catalog, IntentClassifier(encoder), LLM.from_env())
+        return cls(catalog, IntentClassifier(encoder), LLM.from_env() if isinstance(llm, _FromEnv) else llm)
+
+    def with_llm(self, llm: LLM | None) -> Recommender:
+        """Same catalog, classifier and weights, another model. Nothing heavy is copied."""
+        return Recommender(self._catalog, self._classifier, llm, self._weights)
 
     @property
     def llm(self) -> LLM | None:
@@ -108,35 +136,55 @@ class Recommender:
         """
         request = parse(text, catalog=self._catalog, classifier=self._classifier, llm=self._llm)
         if request.intent in DECLINES:
-            return Recommendation(None, DECLINES[request.intent], engine=request.engine)
+            return Recommendation(None, DECLINES[request.intent], engine=request.engine, request=request)
         if request.intent == "unclear":
-            return Recommendation(None, "", follow_up=_clarify(request), engine=request.engine)
+            return Recommendation(None, "", follow_up=_clarify(request), engine=request.engine, request=request)
 
         anchor = self._catalog.find(request.anchor) if request.anchor else None
         if request.anchor and anchor is None:
             question = f'I could not find "{request.anchor}" in the catalog. Could you check the name?'
-            return Recommendation(None, "", follow_up=question, engine=request.engine)
+            return Recommendation(None, "", follow_up=question, engine=request.engine, request=request)
 
-        request = _shorter_than(request, anchor)
-        pool, removed, hard, relaxed = self._pool(request, anchor)
+        return self._decide(_shorter_than(request, anchor), anchor, relax=True)
+
+    def retry(self, previous: Recommendation, hard: HardConstraints, *, relax: bool = False) -> Recommendation:
+        """Runs previous.request again with these hard constraints. No parse and no guard call.
+
+        relax=False keeps the playtime exactly as given. A constraint the person dropped is named in the reason (N14).
+        """
+        request = previous.request
+        if request is None or request.intent != "recommend":
+            raise ValueError("retry needs a recommendation that carries a recommend request")
+        anchor = self._catalog.find(request.anchor) if request.anchor else None
+        return self._decide(request, anchor, relax=relax, asked=hard)
+
+    def _decide(self, request: Request, anchor: Game | None, *, relax: bool,
+                asked: HardConstraints | None = None) -> Recommendation:
+        """request keeps what the person stated. asked replaces its hard constraints on a retry."""
+        asked = request.hard if asked is None else asked
+        dropped = tuple(k for k in LOOSEN_LABELS if getattr(request.hard, k) is not None and getattr(asked, k) is None)
+        pool, removed, hard, relaxed = self._pool(replace(request, hard=asked), anchor, relax)
         trace: dict[str, object] = {
             "catalog": len(self._catalog.games), "eligible": len(pool), "removed": removed, "engine": request.engine,
         }
         if not pool:
-            return Recommendation(None, "", follow_up=_no_match(removed), engine=request.engine, trace=trace)
+            return Recommendation(None, "", follow_up=_no_match(removed), engine=request.engine, trace=trace,
+                                  request=request, offers=_loosen_offers(asked, removed, time_tried=relax))
 
         ranked = self._rank(request, anchor, pool)
         pick = next(s for s in ranked if satisfies(s.game, hard) is None)  # F31
         runners = self._runners_up(pick, ranked)
-        reason = self._reason(request, anchor, pick, runners, relaxed, hard)
-        follow_up = _relax_question(request.hard, hard, len(pool)) if relaxed else None
+        reason = self._reason(request, anchor, pick, runners, relaxed, hard, dropped)
+        follow_up = _relax_question(asked, hard, len(pool)) if relaxed else None
+        offers = _relax_offers(asked, hard) if relaxed else ()
         trace |= {"scored": len(ranked), "picked": 1}
         return Recommendation(pick.game, reason, relaxed, tuple(r.game for r in runners), follow_up,
-                              request.engine, pick.terms, trace)
+                              request.engine, pick.terms, trace, request, offers)
 
-    def _pool(self, request: Request, anchor: Game | None):
+    def _pool(self, request: Request, anchor: Game | None, relax: bool = True):
         first_removed: dict[str, int] | None = None
-        for relaxed, minutes in _minute_steps(request.hard.max_minutes):
+        steps = _minute_steps(request.hard.max_minutes) if relax else [((), request.hard.max_minutes)]
+        for relaxed, minutes in steps:
             hard = replace(request.hard, max_minutes=minutes)
             result = self._catalog.eligible(hard)
             kept, removed = list(result.kept), dict(result.removed)
@@ -217,14 +265,15 @@ class Recommender:
         return chosen[1:]
 
     def _reason(self, request: Request, anchor: Game | None, pick: Scored, runners: list[Scored],
-                relaxed: tuple[str, ...], hard: HardConstraints) -> str:
-        template = _template(anchor, pick, runners, relaxed, hard, request.shorter_than_anchor)
+                relaxed: tuple[str, ...], hard: HardConstraints, dropped: tuple[str, ...] = ()) -> str:
+        template = _template(anchor, pick, runners, relaxed, hard, request.shorter_than_anchor, dropped)
         if self._llm is None or request.engine != "cloud":
             return template
         language = LANGUAGES.get(request.language, "the same language as this request: " + request.text)
         written = self._llm.text(REASON_SYSTEM.format(language=language), f"Game: {pick.game.name}\n{template}")
         if written and grounded(written, pick.game, template + " " + request.text):
-            return f"{written} {pick.game.url}"
+            # The model may leave out the dropped constraint, so it is stated here in any case (N14).
+            return " ".join(part for part in (written, _dropped_note(dropped), pick.game.url) if part)
         return template
 
 
@@ -253,7 +302,7 @@ def _minute_steps(minutes: int | None):
 
 
 def _template(anchor: Game | None, pick: Scored, runners: list[Scored], relaxed: tuple[str, ...],
-              hard: HardConstraints, shorter: bool = False) -> str:
+              hard: HardConstraints, shorter: bool = False, dropped: tuple[str, ...] = ()) -> str:
     g = pick.game
     sentences = [f"{g.name} ({g.year or 'year unknown'}) plays {g.min_players}-{g.max_players} players"
                  + (f" in about {g.max_minutes} minutes." if g.max_minutes else ".")]
@@ -284,8 +333,16 @@ def _template(anchor: Game | None, pick: Scored, runners: list[Scored], relaxed:
         sentences.append(f"Nothing fit your time limit, so I allowed up to {hard.max_minutes} minutes.")
     if "max_minutes dropped" in relaxed:
         sentences.append("Nothing fit your time limit even with extra time, so I ignored the time limit.")
+    if dropped:
+        sentences.append(_dropped_note(dropped))
     sentences.append(g.url)
     return " ".join(sentences)
+
+
+def _dropped_note(dropped: tuple[str, ...]) -> str:
+    if not dropped:
+        return ""
+    return "As you asked, I ignored the " + " and the ".join(LOOSEN_LABELS[k] for k in dropped) + "."
 
 
 def _clarify(request: Request) -> str:
@@ -297,6 +354,24 @@ def _clarify(request: Request) -> str:
 def _no_match(removed: dict[str, int]) -> str:
     parts = [f"{CONSTRAINT_LABELS[k]} removed {v:,}" for k, v in removed.items() if v]
     return "No game in the catalog fits all of that (" + "; ".join(parts) + "). Which one could you loosen?"
+
+
+def _relax_offers(asked: HardConstraints, used: HardConstraints) -> tuple[Offer, ...]:
+    """Buttons for the relax question. Accepting needs no engine call, keeping the limit needs one retry."""
+    accept = f"Yes, {used.max_minutes} min" if used.max_minutes is not None else "Yes, no time limit"
+    return Offer(accept), Offer(f"Keep {asked.max_minutes} min", asked, relax=False)
+
+
+def _loosen_offers(asked: HardConstraints, removed: dict[str, int], time_tried: bool) -> tuple[Offer, ...]:
+    """One button per stated hard constraint that removed games. Only the person can drop players or age.
+
+    time_tried: the engine already dropped the time limit and still found nothing, so offering it again cannot help.
+    """
+    return tuple(
+        Offer(f"Ignore the {label}", replace(asked, **{key: None}), relax=True)
+        for key, label in LOOSEN_LABELS.items()
+        if getattr(asked, key) is not None and removed.get(key) and not (time_tried and key == "max_minutes")
+    )
 
 
 def _relax_question(asked: HardConstraints, used: HardConstraints, fitting: int) -> str:

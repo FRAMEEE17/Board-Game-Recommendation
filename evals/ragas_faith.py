@@ -66,5 +66,5 @@ class RagasFaithfulness:
             break
         self.calls += 1
         self._cache.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"value": value}), encoding="utf-8")
-        return value
+        path.write_text(json.dumps({"value": value}), encoding="utf-8") # type: ignore
+        return value # type: ignore
