@@ -33,21 +33,22 @@ class LLM:
         self._usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0}
 
     @classmethod
+    def from_key(cls, key: str, base_url: str = GROQ_URL, model: str = APP_MODEL) -> LLM:
+        """Builds the app client from arguments only. Reads and writes no environment variable."""
+        from openai import OpenAI
+
+        # max_retries=0: a rate-limited call falls back to the deterministic path at once (F34).
+        client = OpenAI(api_key=key, base_url=base_url, max_retries=0, timeout=10.0)
+        return cls(client, model)
+
+    @classmethod
     def from_env(cls, dotenv: Path = DOTENV) -> LLM | None:
+        """For the CLI, the notebook and the evals. The Streamlit app never calls this."""
         load_dotenv(dotenv)
         key = os.environ.get("LLM_API_KEY")
         if not key:
             return None
-        from openai import OpenAI
-
-        # max_retries=0: a rate-limited call falls back to the deterministic path at once (F34).
-        client = OpenAI(
-            api_key=key,
-            base_url=os.environ.get("LLM_BASE_URL", GROQ_URL),
-            max_retries=0,
-            timeout=10.0,
-        )
-        return cls(client, os.environ.get("LLM_MODEL", APP_MODEL))
+        return cls.from_key(key, os.environ.get("LLM_BASE_URL", GROQ_URL), os.environ.get("LLM_MODEL", APP_MODEL))
 
     def json(self, system: str, user: str, schema: dict, name: str) -> dict | None:
         """None on any failure, so every caller keeps its deterministic path."""

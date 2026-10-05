@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from .llm import LLM
 from .recommender import Recommendation, Recommender
 
-__all__ = ["Recommendation", "Recommender", "recommend"]
+__all__ = ["LLM", "Recommendation", "Recommender", "recommend"]
 
 _default: Recommender | None = None
 

@@ -121,3 +121,34 @@ def test_judge_json_raises_on_a_reply_that_is_not_json():
 def test_judge_client_is_none_without_a_key(monkeypatch, tmp_path):
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     assert judge_client(tmp_path / ".env") is None
+
+
+def test_from_key_builds_a_client_from_arguments_only(monkeypatch):
+    import os
+
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    before = dict(os.environ)
+    llm = LLM.from_key("gsk_test_key", base_url="https://example.test/v1", model="some/model")
+    assert llm.model == "some/model"
+    assert llm._client.api_key == "gsk_test_key"
+    assert str(llm._client.base_url).startswith("https://example.test/v1")
+    assert llm._client.max_retries == 0
+    assert llm._client.timeout == 10.0
+    assert dict(os.environ) == before
+
+
+def test_from_env_goes_through_from_key(monkeypatch, tmp_path):
+    seen = []
+    monkeypatch.setenv("LLM_API_KEY", "gsk_env_key")
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.setattr(LLM, "from_key", classmethod(lambda cls, key, base_url, model: seen.append((key, base_url, model))))
+    LLM.from_env(tmp_path / ".env")
+    assert seen == [("gsk_env_key", "https://api.groq.com/openai/v1", "openai/gpt-oss-20b")]
+
+
+def test_two_keys_make_two_independent_usage_counters():
+    first, second = LLM.from_key("gsk_a"), LLM.from_key("gsk_b")
+    first._count(SimpleNamespace(usage=SimpleNamespace(prompt_tokens=5, completion_tokens=2)))
+    assert first.usage["prompt_tokens"] == 5
+    assert second.usage == {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0}
