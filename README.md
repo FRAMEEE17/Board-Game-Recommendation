@@ -1,4 +1,5 @@
 # Board Game Recommendation
+Demo: [https://sunday-morning.streamlit.app/]
 
 Type what you want in any language and get one board game back, with a reason. It picks
 from about 2,000 BoardGameGeek games. [https://www.kaggle.com/datasets/andrewmvd/board-games]
